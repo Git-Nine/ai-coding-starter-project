@@ -11,9 +11,9 @@ function safeReturnTo(value?: string): string {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ returnTo?: string }>
+  searchParams: Promise<{ returnTo?: string; error?: string }>
 }) {
-  const { returnTo } = await searchParams
+  const { returnTo, error } = await searchParams
   const supabase = await createClient()
   const {
     data: { user },
@@ -21,9 +21,14 @@ export default async function LoginPage({
 
   if (user) redirect(safeReturnTo(returnTo))
 
+  const linkError =
+    error === 'link_invalid'
+      ? 'That sign-in link was invalid or has expired. Request a new one below.'
+      : null
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-6">
-      <LoginForm returnTo={safeReturnTo(returnTo)} />
+      <LoginForm returnTo={safeReturnTo(returnTo)} initialError={linkError} />
     </main>
   )
 }

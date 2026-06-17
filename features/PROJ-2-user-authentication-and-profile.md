@@ -2,7 +2,7 @@
 
 ## Status: In Progress
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-06-18 (backend implemented)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — magic-link auth provider, `users` profile table, RLS, private `photos` bucket, and session-refresh middleware.
@@ -87,7 +87,7 @@
 - [x] Avatar orphan cleanup if the DB update fails after a successful upload — **Resolved (/architecture):** fixed per-user avatar path + overwrite, so there is at most one avatar file per user (no orphan pile-up).
 - [x] Session lifetime / "remember me" duration — **Resolved (/architecture):** accept Supabase defaults.
 - [x] Logout scope — **Resolved (/architecture):** current session/device only.
-- [ ] Operator config (verify in `/backend`): email template must include the 6-digit token; Site URL + redirect URLs set for the callback route.
+- [~] Operator config (from `/backend`): code is complete, but three manual steps remain for the operator before QA — apply the PROJ-2 migration, set `SUPABASE_SERVICE_ROLE_KEY` in `.env.local`, and configure the email template (6-digit token) + Site URL/redirect URLs for `/auth/callback`. See Implementation Notes (Backend).
 
 ## Decision Log
 
@@ -191,6 +191,30 @@ See the Technical Decisions table above. Key points: PKCE magic link + 6-digit c
 - **`/api/account/delete`** route (service-role) — the delete dialog POSTs here.
 - **Middleware route-gating** — PROJ-1's middleware only refreshes the session; pages currently self-guard via server-side `getUser()`. Also resolve the Next 16 `middleware`→`proxy` rename deprecation.
 - Dashboard: add the 6-digit token to the email template; set Site URL + redirect URLs for `/auth/callback`.
+
+## Implementation Notes (Backend)
+
+**Database (`supabase/migrations/20260618120000_proj2_users_profile_fields.sql`):**
+- Extends `public.users` with `display_name` (text, `<= 50` chars enforced by a CHECK as server-side defense-in-depth) and `avatar_path` (text, nullable). `add column if not exists` → idempotent. RLS, owner-only policies, and the role-escalation trigger are inherited unchanged from PROJ-1.
+- ⚠️ **Migration not yet applied to the remote DB** — the Supabase MCP is in read-only mode and there is no local CLI/link. **Action required:** run this migration's SQL in the Supabase dashboard SQL editor (same way PROJ-1 was applied) before saving display name / avatar will persist.
+
+**Routes built:**
+- **`/auth/callback` (`route.ts`)** — GET handler for the magic-link *tap* path: exchanges the PKCE `code` for a session and redirects to a validated `returnTo` (open-redirect-guarded). On an expired/used/missing code, redirects to `/login?error=link_invalid` (preserving `returnTo`). The 6-digit code path does not pass through here.
+- **`/api/account/delete` (`route.ts`)** — POST handler; verifies the caller's session (401 if absent), then uses the **service-role** admin client to `auth.admin.deleteUser(user.id)`. The id comes only from the verified session, never the client. Deletion triggers PROJ-1's cascade (profile row via FK, photos via `on_auth_user_deleted`). Returns 500 on failure; the client signs out + redirects on success.
+
+**Auth/session infrastructure:**
+- **Route-gating moved into the proxy** (`src/lib/supabase/middleware.ts` → `updateSession`): unauthenticated visitors to protected pages are redirected to `/login?returnTo=…`; already-signed-in users are bounced off `/login`. **API routes are exempt** from the redirect so `fetch()` gets a real 401 instead of a 307→HTML that would masquerade as success. Refreshed auth cookies are carried onto redirect responses. Pages still keep their own server-side `getUser()` guards (defense-in-depth).
+- **Next 16 `middleware`→`proxy` rename resolved:** `src/middleware.ts` → `src/proxy.ts`, exporting `proxy`. Build confirms `ƒ Proxy (Middleware)`.
+- **Service-role admin client** (`src/lib/supabase/admin.ts`): reads `SUPABASE_SERVICE_ROLE_KEY` (server-only, no `NEXT_PUBLIC_`); used solely by the delete route. No new package added (`server-only` guard omitted; the non-public env var is `undefined` in the browser, so a client import throws).
+
+**Profile writes — kept client-side (decision this step):** the built frontend updates `public.users` directly via the browser client. RLS (owner-only) + the PROJ-1 role-escalation trigger already enforce the security the spec's "server-side writes" decision aimed for, and the form never sends `role`. Chosen over building a redundant `/api/profile` route to avoid rewiring working UI. Avatar uploads remain client-side to the private bucket (storage RLS enforces the per-user namespace).
+
+**Operator config still required (not code):**
+- Apply the migration above.
+- Add `SUPABASE_SERVICE_ROLE_KEY` to `.env.local` (the secret/service-role key — **never** `NEXT_PUBLIC_`). `.env.local.example` could not be updated automatically (env files are permission-blocked); add the line there too.
+- Supabase dashboard: include the **6-digit token** in the magic-link email template; set **Site URL + redirect URLs** to allow `/auth/callback`.
+
+**Verification:** `tsc --noEmit` clean · `next build` succeeds (all routes + Proxy) · tests **13/13** (env 4, delete route 4, callback route 5). Route tests cover happy path, 401 unauth, session-id-only authorization, 500 failure, valid/invalid/missing code, and the open-redirect guard.
 
 ## QA Test Results
 _To be added by /qa_

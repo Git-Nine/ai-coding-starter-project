@@ -5,7 +5,7 @@ describe('parseSupabaseEnv', () => {
   const valid = {
     NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
     NEXT_PUBLIC_SUPABASE_ANON_KEY: 'anon-key-123',
-  } as unknown as NodeJS.ProcessEnv
+  }
 
   it('returns the parsed values when all variables are valid', () => {
     expect(parseSupabaseEnv(valid)).toEqual({
@@ -16,7 +16,7 @@ describe('parseSupabaseEnv', () => {
 
   it('throws (fail fast) when the URL is missing', () => {
     expect(() =>
-      parseSupabaseEnv({ NEXT_PUBLIC_SUPABASE_ANON_KEY: 'x' } as unknown as NodeJS.ProcessEnv),
+      parseSupabaseEnv({ NEXT_PUBLIC_SUPABASE_ANON_KEY: 'x' }),
     ).toThrow(/SUPABASE_URL/)
   })
 
@@ -25,7 +25,7 @@ describe('parseSupabaseEnv', () => {
       parseSupabaseEnv({
         ...valid,
         NEXT_PUBLIC_SUPABASE_URL: 'not-a-url',
-      } as unknown as NodeJS.ProcessEnv),
+      }),
     ).toThrow(/valid URL/)
   })
 
@@ -33,7 +33,7 @@ describe('parseSupabaseEnv', () => {
     expect(() =>
       parseSupabaseEnv({
         NEXT_PUBLIC_SUPABASE_URL: 'https://example.supabase.co',
-      } as unknown as NodeJS.ProcessEnv),
+      }),
     ).toThrow(/ANON_KEY/)
   })
 })

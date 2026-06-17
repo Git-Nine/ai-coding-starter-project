@@ -13,7 +13,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-export function LoginForm({ returnTo = '/' }: { returnTo?: string }) {
+export function LoginForm({
+  returnTo = '/',
+  initialError = null,
+}: {
+  returnTo?: string
+  /** Set when an expired/used magic link redirected back here (?error=link_invalid). */
+  initialError?: string | null
+}) {
   const supabase = createClient()
   const [sentTo, setSentTo] = useState<string | null>(null)
 
@@ -82,6 +89,14 @@ export function LoginForm({ returnTo = '/' }: { returnTo?: string }) {
       <CardContent>
         {!sentTo ? (
           <form onSubmit={emailForm.handleSubmit(sendLink)} className="space-y-4" noValidate>
+            {initialError && (
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {initialError}
+              </p>
+            )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input

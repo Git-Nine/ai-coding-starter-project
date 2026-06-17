@@ -2,14 +2,22 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { getSupabaseEnv } from './env'
 
+/** Only allow internal redirect targets (prevents open-redirect via ?returnTo=). */
+function safeReturnTo(value: string | null): string {
+  if (value && value.startsWith('/') && !value.startsWith('//')) return value
+  return '/'
+}
+
 /**
- * Refreshes the Supabase auth session on every request and keeps the auth
- * cookies in sync between the request and response. Call this from the root
- * middleware.
+ * Runs on every request (from the root proxy). Two jobs:
+ *   1. Refresh the Supabase auth session and keep auth cookies in sync between
+ *      request and response (the PROJ-1 behavior).
+ *   2. PROJ-2 route-gating: send unauthenticated visitors to /login (remembering
+ *      where they were headed) and bounce already-signed-in users off /login.
  *
- * Note: PROJ-1 only refreshes the session. Route-level protection (redirecting
- * unauthenticated users away from private pages) is added by PROJ-2, once there
- * are protected routes to guard.
+ * API routes are intentionally NOT redirected — they enforce their own auth and
+ * return proper status codes, so a fetch() gets a 401 rather than a 307→HTML
+ * redirect that would masquerade as success.
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -33,7 +41,37 @@ export async function updateSession(request: NextRequest) {
 
   // IMPORTANT: do not run any logic between creating the client and calling
   // getUser() — it refreshes the auth token and must run on every request.
-  await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  const { pathname } = request.nextUrl
+  const isAuthRoute = pathname === '/login' || pathname.startsWith('/auth')
+  const isApiRoute = pathname.startsWith('/api')
+
+  // Build a redirect response that carries the refreshed auth cookies along.
+  const redirectTo = (url: URL) => {
+    const res = NextResponse.redirect(url)
+    supabaseResponse.cookies.getAll().forEach((cookie) => res.cookies.set(cookie))
+    return res
+  }
+
+  // Unauthenticated visitor hitting a protected page → /login?returnTo=…
+  if (!user && !isAuthRoute && !isApiRoute) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.search = ''
+    url.searchParams.set('returnTo', pathname + request.nextUrl.search)
+    return redirectTo(url)
+  }
+
+  // Already signed in but on /login → send them home (or to their returnTo).
+  if (user && pathname === '/login') {
+    const url = request.nextUrl.clone()
+    url.pathname = safeReturnTo(request.nextUrl.searchParams.get('returnTo'))
+    url.search = ''
+    return redirectTo(url)
+  }
 
   return supabaseResponse
 }
