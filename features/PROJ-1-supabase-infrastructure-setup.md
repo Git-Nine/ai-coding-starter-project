@@ -1,6 +1,6 @@
 # PROJ-1: Supabase Infrastructure Setup
 
-## Status: In Progress
+## Status: Approved
 **Created:** 2026-06-17
 **Last Updated:** 2026-06-17
 
@@ -157,7 +157,78 @@ See the Technical Decisions table above for the full list with rationale. Key po
 **Tests:** `src/lib/supabase/env.test.ts` — 4 passing (valid env; missing URL; invalid URL; missing anon key). No API routes in this feature, so no route tests. Typecheck (`tsc --noEmit`) passes. (Project-wide `npm run lint` is broken: Next 16 removed `next lint` while the repo still uses `.eslintrc` — pre-existing, unrelated to this feature.)
 
 ## QA Test Results
-_To be added by /qa_
+
+**Tested:** 2026-06-17
+**Tester:** QA Engineer (AI)
+**Method:** Backend-only infrastructure feature — no UI, no API routes. Verified via (a) Vitest unit tests, (b) read-only SQL structural inspection of the live project, (c) security advisor, (d) red-team review of RLS/policy/trigger logic. **Runtime behavioural verification is blocked in this environment** (see note below).
+
+### Acceptance Criteria Status
+
+#### AC-1: Env vars set → client connects — ⚠️ PARTIAL
+- [x] Env validation logic verified (`parseSupabaseEnv`, unit-tested)
+- [ ] Live client connection not exercised (needs the running app with `.env.local`)
+
+#### AC-2: Missing/invalid env vars → fail fast — ✅ PASS
+- [x] Verified by 3 unit tests (missing URL, invalid URL, missing anon key all throw with a field-named message)
+
+#### AC-3: New user first auth → auto-creates `users` row with `role='user'` — ⚠️ STRUCTURAL PASS
+- [x] `on_auth_user_created` AFTER INSERT trigger present + enabled; `handle_new_user` idempotent (`on conflict do nothing`); `role` defaults to `'user'`
+- [ ] Not exercised at runtime (no real sign-up performed — no login UI until PROJ-2)
+
+#### AC-4: Magic link enabled → sends email — ⚠️ UNVERIFIED (runtime)
+- [ ] Requires the running app + Auth provider config check; email provider is on by default. Verify during PROJ-2.
+
+#### AC-5 / AC-6: RLS — user sees/edits only own row; cross-user access denied — ⚠️ STRUCTURAL PASS
+- [x] RLS enabled on `public.users`; SELECT/INSERT/UPDATE policies all scoped to `(select auth.uid()) = id`; no DELETE policy (cascade-only, intentional)
+- [ ] Cross-user denial not exercised at runtime (needs two authenticated accounts; read-only MCP can't seed/impersonate)
+
+#### AC-7 / AC-8: Storage — upload to own folder succeeds; other folders denied — ⚠️ STRUCTURAL PASS
+- [x] `photos` bucket is private; SELECT/INSERT/UPDATE/DELETE policies scoped to `bucket_id='photos' AND (storage.foldername(name))[1] = auth.uid()`; root-level uploads denied (foldername[1] is NULL)
+- [ ] Not exercised at runtime (needs authenticated upload)
+
+#### AC-9: New user defaults to `role='user'` — ✅ PASS
+- [x] Column default `'user'` + check `('user','admin')` confirmed in live schema
+
+#### AC-10: Manually-set `role='admin'` is returned and usable — ⚠️ STRUCTURAL PASS
+- [x] Check constraint allows `'admin'`; manual promotion path works (dashboard/`postgres` bypasses RLS + the escalation guard)
+- [ ] Not exercised at runtime
+
+### Edge Cases Status
+- [x] **Missing/invalid env** → fail fast (unit-tested)
+- [x] **Repeated first-login race** → idempotent insert (`on conflict (id) do nothing`)
+- [x] **Auth user deletion → files removed** — **investigated and CONFIRMED viable:** `handle_user_deletion` is `SECURITY DEFINER` owned by `postgres`, and `postgres` has `rolbypassrls = true`, so the `DELETE` on `storage.objects` is **not** blocked by RLS (this was the top red-team concern). `users` row removal confirmed via FK `ON DELETE CASCADE`. _(Runtime deletion not executed, but the mechanism is sound.)_
+- [x] **Storage path manipulation** → folder-scoped policy denies access outside `/{user_id}/`
+- [x] **Role self-escalation** → `trg_prevent_role_self_escalation` (BEFORE UPDATE) present + enabled; reverts role changes from non-admin end-users
+- [~] **Expired/reused magic-link token** → Supabase-managed; verify at runtime in PROJ-2
+
+### Security Audit Results (Red Team)
+- [x] **Authorization:** owner-only RLS on `users`; folder-scoped on storage. Anon (auth.uid() null) gets zero rows — verified by policy logic.
+- [x] **Privilege escalation:** self-promotion to `admin` blocked by trigger (defense beyond the RLS policy).
+- [x] **SECURITY DEFINER exposure:** previously flagged by advisor (lints 0028/0029); fixed by revoking EXECUTE. **Security advisor now returns 0 warnings.**
+- [x] **Secret handling:** only public URL + anon/publishable key are client-exposed; service-role key not referenced in app code.
+- [x] **Search-path injection:** all trigger functions pin `search_path = ''` and fully-qualify objects.
+- No Critical or High findings.
+
+### Bugs Found
+
+#### BUG-1: `users.email` is NOT NULL — future non-email auth providers would break sign-up — ✅ FIXED
+- **Severity:** Low
+- **Detail:** `handle_new_user` inserts `new.email`; if a future provider (phone/anonymous) creates an auth user with a null email, the trigger insert fails and blocks sign-up. **No impact for v1** (magic-link always supplies an email).
+- **Fix:** `…_proj1_qa_low_bug_fixes.sql` — `users.email` made nullable (verified `is_nullable = YES`).
+
+#### BUG-2: RLS policies target role `public` instead of `authenticated` — ✅ FIXED
+- **Severity:** Low (cosmetic / best-practice)
+- **Detail:** Policies were functionally safe (the `auth.uid()` qual denies anon), but scoping them `TO authenticated` is the recommended pattern and avoids evaluating policies for anonymous requests.
+- **Fix:** `…_proj1_qa_low_bug_fixes.sql` — all 7 policies recreated `TO authenticated` (verified). Advisor still clean (0 warnings).
+
+### Summary
+- **Acceptance Criteria:** 2/10 fully verified (AC-2, AC-9); 7/10 **structurally verified, runtime pending**; 1/10 (AC-4) runtime-only, unverified.
+- **Bugs Found:** 2 total (0 Critical, 0 High, 0 Medium, 2 Low) — **both FIXED** and re-verified.
+- **Security:** Pass — advisor clean (0 warnings); top red-team concern (GDPR file deletion) investigated and confirmed viable.
+- **Production Ready:** **YES.** Infrastructure correctly defined, no Critical/High issues, both Low bugs fixed. **Runtime behavioural ACs (auth flow, RLS denial, storage isolation) carried forward** to PROJ-2 (they require a login UI that doesn't exist yet).
+- **Recommendation:** Approved. AC-3, AC-5, AC-6, AC-7, AC-8 are carried to PROJ-2's E2E suite for runtime proof against two real accounts.
+
+> **Note on E2E tests:** No Playwright suite was written for PROJ-1 — there is no UI to drive. The auth/RLS/storage behaviours will be covered end-to-end once PROJ-2 (Authentication & Profile) adds the login flow; those E2E tests should assert AC-3, AC-5, AC-6, AC-7, AC-8 against two real accounts.
 
 ## Deployment
 _To be added by /deploy_
