@@ -1,6 +1,6 @@
 # PROJ-2: User Authentication & Profile
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-06-18
 **Last Updated:** 2026-06-18
 
@@ -83,10 +83,11 @@
 - The PROJ-1 carried-forward ACs (AC-3/5/6/7/8) must be covered by this feature's E2E suite, exercised against two real accounts.
 
 ## Open Questions
-- [ ] Magic-link cross-browser/device behavior under PKCE — confirm acceptable UX in `/architecture`.
-- [ ] Avatar orphan cleanup if the DB update fails after a successful upload — define in `/backend`.
-- [ ] Session lifetime / "remember me" duration — accept Supabase defaults?
-- [ ] Logout scope — current session only (recommended) vs. all sessions/devices?
+- [x] Magic-link cross-browser/device behavior under PKCE — **Resolved (/architecture):** add a 6-digit code fallback so the user can complete sign-in on the requesting device.
+- [x] Avatar orphan cleanup if the DB update fails after a successful upload — **Resolved (/architecture):** fixed per-user avatar path + overwrite, so there is at most one avatar file per user (no orphan pile-up).
+- [x] Session lifetime / "remember me" duration — **Resolved (/architecture):** accept Supabase defaults.
+- [x] Logout scope — **Resolved (/architecture):** current session/device only.
+- [ ] Operator config (verify in `/backend`): email template must include the 6-digit token; Site URL + redirect URLs set for the callback route.
 
 ## Decision Log
 
@@ -105,13 +106,68 @@
 ### Technical Decisions
 | Decision | Rationale | Date |
 |----------|-----------|------|
-| _To be added by /architecture_ | | |
+| Magic link (PKCE, `/auth/callback`) + 6-digit code fallback | Secure server-side flow; the code lets a user complete sign-in on the requesting device if the link opens on a different device/browser | 2026-06-18 |
+| Route protection in middleware (extends PROJ-1's session refresher) | One central gate for all protected routes; also bounces logged-in users off `/login` — no per-page guards to forget | 2026-06-18 |
+| Profile reads/writes server-side; only safe columns writable (never `role`) | Defense-in-depth on top of PROJ-1's escalation guard; client can't submit a role change | 2026-06-18 |
+| Avatar stored at a fixed per-user path in the private `photos` bucket, overwrite-on-replace, shown via signed URL | Bounds avatar files to one per user (solves the orphaned-file edge case); private bucket reuse (no social/sharing in v1) | 2026-06-18 |
+| Account deletion via a server-only privileged route using the service-role key | Deleting an auth user requires the service-role key, which must stay server-side; this route is the single place it is used; triggers PROJ-1 cascade (profile row + files) | 2026-06-18 |
+| Accept Supabase session defaults; logout = current device only | Sensible defaults; per-device logout matches user expectation and keeps scope small | 2026-06-18 |
+| No new packages | `@supabase/ssr`, `@supabase/supabase-js`, `zod`, `react-hook-form`, and shadcn components are all already installed | 2026-06-18 |
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Screens & Components
+
+```
+/login  (public)
+├── Email form — enter email, request sign-in
+└── Confirmation state ("check your email")
+    ├── 6-digit code input → verify on THIS device  ← cross-device fallback
+    └── "…or tap the link in the email" + Resend (with rate-limit message)
+
+/auth/callback  (public)
+└── Handles the magic-link click → completes sign-in → redirects to returnTo/home
+
+App (everything else, protected)
+└── Middleware redirects unauthenticated visitors → /login?returnTo=…
+    and redirects already-logged-in users away from /login
+
+/profile  (protected)
+├── Avatar — upload / replace / remove; initials placeholder when empty
+├── Email — read-only
+├── Display name — editable (≤50 chars)
+├── Maintenance preference — select (low / medium / high)
+├── Experience level — select (beginner / intermediate / expert)
+├── Save → success toast
+├── Log out
+└── Delete account → confirm dialog → wipes everything → back to /login
+```
+
+Built entirely from existing shadcn components (`form`, `input`, `button`, `avatar`, `select`, `alert-dialog`, `sonner`, `card`).
+
+### Data Model (plain language)
+**Extends PROJ-1's `users` table** with two optional fields:
+- **Display name** — optional text, up to 50 characters
+- **Avatar reference** — the storage path of the user's picture (or empty)
+
+Everything else (`email`, `role`, `maintenance_preference`, `experience_level`) already exists. The **avatar image** lives in PROJ-1's existing **private `photos` bucket** at a fixed per-user path (one avatar file per user; replacing overwrites), shown via a short-lived signed URL.
+
+### Tech Decisions (summary)
+See the Technical Decisions table above. Key points: PKCE magic link + 6-digit code fallback; route protection centralized in middleware; profile writes server-side with `role` never accepted from the client; fixed-path avatar overwrite; account deletion through a single server-only service-role route that triggers PROJ-1's cascade; Supabase session defaults; current-device logout.
+
+### Dependencies to Install
+- **None** — all required packages (`@supabase/ssr`, `@supabase/supabase-js`, `zod`, `react-hook-form`) and shadcn components are already present.
+
+### New Operator / Config Items (for `/backend` + setup)
+- Add a **server-only** `SUPABASE_SERVICE_ROLE_KEY` env var (never `NEXT_PUBLIC_`) — used solely by the delete-account route.
+- Supabase dashboard: include the **6-digit token** in the email template (enables the code fallback) and set the **Site URL + redirect URLs** for `/auth/callback`.
+
+### Notes for Implementation
+- This feature needs **both** `/frontend` (login, profile, avatar UI) and `/backend` (callback route, profile update + avatar upload server logic, delete-account route, middleware route-gating).
+- The PROJ-1 carried-forward runtime ACs (AC-3/5/6/7/8) should be exercised by this feature's E2E suite against two real accounts.
 
 ## QA Test Results
 _To be added by /qa_
