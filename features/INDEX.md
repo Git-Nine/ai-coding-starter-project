@@ -13,9 +13,25 @@
 
 ## Features
 
-| ID | Feature | Status | Spec | Created |
-|----|---------|--------|------|---------|
+| ID | Feature | Status | Priority | Depends on | Spec | Created |
+|----|---------|--------|----------|-----------|------|---------|
+| PROJ-1 | Supabase Infrastructure Setup | Planned | P0 | None | [PROJ-1](PROJ-1-supabase-infrastructure-setup.md) | 2026-06-17 |
+| PROJ-2 | User Authentication & Profile | Roadmap | P0 | PROJ-1 | — | 2026-06-17 |
+| PROJ-3 | Photo Upload & Space Scan | Roadmap | P0 | PROJ-1, PROJ-2 | — | 2026-06-17 |
+| PROJ-4 | Environmental Data Enrichment | Roadmap | P0 | PROJ-3 | — | 2026-06-17 |
+| PROJ-5 | Plant Database & Admin Interface | Roadmap | P0 | PROJ-1, PROJ-2 | — | 2026-06-17 |
+| PROJ-6 | Rule-Based Plan Generation | Roadmap | P0 | PROJ-3, PROJ-4, PROJ-5 | — | 2026-06-17 |
+| PROJ-7 | Plan Review & Acceptance | Roadmap | P0 | PROJ-6 | — | 2026-06-17 |
+| PROJ-8 | Shopping List & Deep Links | Roadmap | P0 | PROJ-7 | — | 2026-06-17 |
+| PROJ-9 | Progress Photo Log | Roadmap | P1 | PROJ-7 | — | 2026-06-17 |
 
 <!-- Add features above this line -->
 
-## Next Available ID: PROJ-1
+## Build Order
+PROJ-1 → PROJ-2 → PROJ-3 → PROJ-4 → PROJ-5 → PROJ-6 → PROJ-7 → PROJ-8 → PROJ-9
+
+Notes:
+- PROJ-4 (Environmental Enrichment) is split from PROJ-3 (Scan): separate concern, 3 external APIs, and a blocking open question on the BGR endpoint. The scan stores manual-form data on its own; enrichment augments it.
+- PROJ-5 (Plant DB & Admin) must precede PROJ-6 (Plan Generation) — the rule engine can't run without seeded, rule-tagged plants.
+
+## Next Available ID: PROJ-10
