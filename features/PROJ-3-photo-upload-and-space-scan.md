@@ -243,7 +243,7 @@ Scan create / read / update / delete run **client-side through Supabase**, exact
 - Columns: `id` (uuid, client-supplied or `gen_random_uuid()`), `user_id`, `name` (≤60 check), `photo_path` (not null — enforces "photo required" at the DB), `postcode` (not null, `~ '^\d{5}$'`), `lat`/`lng` (nullable, for PROJ-4), `sun_exposure`/`surface`/`space_type` (enum checks matching the client option sets), `area_sqm` (int, 1–5000 check), `taken_at`, `created_at`, `updated_at`.
 - Composite index `idx_scans_user_created (user_id, created_at desc)` serves the list query (own scans, newest first) and FK/cascade lookups.
 - `set_updated_at` BEFORE UPDATE trigger keeps `updated_at` fresh. Plain (not SECURITY DEFINER) with `search_path = ''` pinned to stay advisor-clean.
-- ⚠️ **Apply step (operator):** run this migration in the Supabase SQL editor (same as PROJ-1/PROJ-2 — MCP was read-only). Until applied, the scans list shows the empty state and saving errors.
+- ✅ **Applied & verified (2026-06-18):** migration run via the Supabase SQL editor. Confirmed through MCP — `public.scans` present with RLS enabled, all column checks + FK to `auth.users`, the 4 owner-only policies, `idx_scans_user_created`, and the `trg_scans_set_updated_at` trigger. Security advisor: no new warnings (the lone WARN — leaked-password protection — is a passwordless-auth non-issue; Sproutly is magic-link only).
 
 **Route built — `POST /api/geocode` (`route.ts`):**
 - Auth-gated (401 if no session). Zod-validates `{ lat, lng }` (400 on bad/non-JSON body). Reverse-geocodes via **Nominatim (OSM)** server-side with an identifying `User-Agent`, `Accept-Language: de`, and a 4s abort timeout.
