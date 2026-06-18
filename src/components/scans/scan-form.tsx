@@ -1,0 +1,284 @@
+'use client'
+
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
+import { Loader2, MapPin } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import { downscaleImage, type PhotoExif } from '@/lib/image'
+import {
+  SUN_OPTIONS,
+  SURFACE_OPTIONS,
+  SPACE_TYPE_OPTIONS,
+  NAME_MAX,
+  AREA_MIN,
+  AREA_MAX,
+  STORAGE_BUCKET,
+  scanPhotoPath,
+  scanSchema,
+  type Scan,
+} from '@/lib/scans'
+import { PhotoPicker } from './photo-picker'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+
+type Errors = Partial<Record<'photo' | 'name' | 'postcode' | 'sun_exposure' | 'surface' | 'space_type' | 'area_sqm', string>>
+
+export function ScanForm({
+  userId,
+  scan,
+  photoUrl,
+}: {
+  userId: string
+  /** Existing scan when editing; null for a new scan. */
+  scan: Scan | null
+  /** Signed URL of the existing photo (edit mode). */
+  photoUrl: string | null
+}) {
+  const supabase = createClient()
+  const router = useRouter()
+
+  const [file, setFile] = useState<File | null>(null)
+  const [exif, setExif] = useState<PhotoExif | null>(null)
+  const [name, setName] = useState(scan?.name ?? '')
+  const [postcode, setPostcode] = useState(scan?.postcode ?? '')
+  const [postcodeTouched, setPostcodeTouched] = useState(Boolean(scan?.postcode))
+  const [autofilled, setAutofilled] = useState(false)
+  const [sun, setSun] = useState<string>(scan?.sun_exposure ?? '')
+  const [surface, setSurface] = useState<string>(scan?.surface ?? '')
+  const [spaceType, setSpaceType] = useState<string>(scan?.space_type ?? '')
+  const [area, setArea] = useState<string>(scan ? String(scan.area_sqm) : '')
+  const [errors, setErrors] = useState<Errors>({})
+  const [saving, setSaving] = useState(false)
+
+  const isEdit = scan !== null
+
+  async function handlePhoto(picked: File | null, pickedExif: PhotoExif | null) {
+    setFile(picked)
+    setExif(pickedExif)
+    setErrors((e) => ({ ...e, photo: undefined }))
+
+    // Auto-fill postcode from the photo's GPS — only if the user hasn't typed one.
+    if (pickedExif?.lat != null && pickedExif?.lng != null && !postcodeTouched) {
+      try {
+        const res = await fetch('/api/geocode', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: pickedExif.lat, lng: pickedExif.lng }),
+        })
+        if (res.ok) {
+          const data = (await res.json()) as { postcode?: string | null }
+          if (data.postcode && !postcodeTouched) {
+            setPostcode(data.postcode)
+            setAutofilled(true)
+          }
+        }
+      } catch {
+        // Silent fallback — the user just enters the postcode manually.
+      }
+    }
+  }
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault()
+
+    const parsed = scanSchema.safeParse({
+      name,
+      postcode,
+      sun_exposure: sun,
+      surface,
+      space_type: spaceType,
+      area_sqm: area === '' ? NaN : Number(area),
+    })
+
+    const nextErrors: Errors = {}
+    if (!parsed.success) {
+      const fieldErrors = parsed.error.flatten().fieldErrors
+      for (const [key, msgs] of Object.entries(fieldErrors)) {
+        if (msgs?.[0]) nextErrors[key as keyof Errors] = msgs[0]
+      }
+    }
+    if (!isEdit && !file) {
+      nextErrors.photo = 'Add a photo of your space'
+    }
+    if (Object.keys(nextErrors).length > 0 || !parsed.success) {
+      setErrors(nextErrors)
+      toast.error('Please fix the highlighted fields.')
+      return
+    }
+    setErrors({})
+
+    setSaving(true)
+    const scanId = scan?.id ?? crypto.randomUUID()
+    try {
+      let photoPath = scan?.photo_path ?? null
+
+      if (file) {
+        const optimized = await downscaleImage(file)
+        const path = scanPhotoPath(userId, scanId)
+        const { error: uploadError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .upload(path, optimized, { upsert: true, contentType: optimized.type })
+        if (uploadError) throw uploadError
+        photoPath = path
+      }
+
+      const fields = {
+        name: parsed.data.name.trim() || null,
+        postcode: parsed.data.postcode,
+        sun_exposure: parsed.data.sun_exposure,
+        surface: parsed.data.surface,
+        space_type: parsed.data.space_type,
+        area_sqm: parsed.data.area_sqm,
+        photo_path: photoPath,
+      }
+
+      if (isEdit) {
+        // Refresh GPS/date only when a new photo was provided.
+        const geo = file ? { lat: exif?.lat ?? null, lng: exif?.lng ?? null, taken_at: exif?.takenAt ?? null } : {}
+        const { error: updateError } = await supabase
+          .from('scans')
+          .update({ ...fields, ...geo })
+          .eq('id', scanId)
+        if (updateError) throw updateError
+      } else {
+        const { error: insertError } = await supabase.from('scans').insert({
+          id: scanId,
+          user_id: userId,
+          ...fields,
+          lat: exif?.lat ?? null,
+          lng: exif?.lng ?? null,
+          taken_at: exif?.takenAt ?? null,
+        })
+        if (insertError) throw insertError
+      }
+
+      toast.success('Space saved.')
+      router.push(`/scans/${scanId}`)
+      router.refresh()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not save your scan. Please try again.')
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSave} className="space-y-6">
+      <div className="space-y-2">
+        <Label>Photo</Label>
+        <PhotoPicker initialUrl={photoUrl} onSelect={handlePhoto} />
+        {errors.photo && <p className="text-sm text-destructive">{errors.photo}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="postcode">Postcode (PLZ)</Label>
+        <Input
+          id="postcode"
+          inputMode="numeric"
+          maxLength={5}
+          placeholder="e.g. 10115"
+          value={postcode}
+          onChange={(e) => {
+            setPostcode(e.target.value.replace(/\D/g, '').slice(0, 5))
+            setPostcodeTouched(true)
+            setAutofilled(false)
+          }}
+          aria-invalid={!!errors.postcode}
+        />
+        {autofilled && !errors.postcode && (
+          <p className="inline-flex items-center gap-1 text-xs text-accent">
+            <MapPin className="h-3 w-3" /> Filled from your photo&apos;s location — edit if needed
+          </p>
+        )}
+        {errors.postcode && <p className="text-sm text-destructive">{errors.postcode}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="sun">Sun exposure</Label>
+        <Select value={sun} onValueChange={(v) => { setSun(v); setErrors((e) => ({ ...e, sun_exposure: undefined })) }}>
+          <SelectTrigger id="sun" aria-invalid={!!errors.sun_exposure}>
+            <SelectValue placeholder="How much sun does it get?" />
+          </SelectTrigger>
+          <SelectContent>
+            {SUN_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {errors.sun_exposure && <p className="text-sm text-destructive">{errors.sun_exposure}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="surface">Current surface</Label>
+        <Select value={surface} onValueChange={(v) => { setSurface(v); setErrors((e) => ({ ...e, surface: undefined })) }}>
+          <SelectTrigger id="surface" aria-invalid={!!errors.surface}>
+            <SelectValue placeholder="What's there now?" />
+          </SelectTrigger>
+          <SelectContent>
+            {SURFACE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {errors.surface && <p className="text-sm text-destructive">{errors.surface}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="space_type">Space type</Label>
+        <Select value={spaceType} onValueChange={(v) => { setSpaceType(v); setErrors((e) => ({ ...e, space_type: undefined })) }}>
+          <SelectTrigger id="space_type" aria-invalid={!!errors.space_type}>
+            <SelectValue placeholder="What kind of space is it?" />
+          </SelectTrigger>
+          <SelectContent>
+            {SPACE_TYPE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {errors.space_type && <p className="text-sm text-destructive">{errors.space_type}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="area">Approximate area (m²)</Label>
+        <Input
+          id="area"
+          type="number"
+          inputMode="numeric"
+          min={AREA_MIN}
+          max={AREA_MAX}
+          step={1}
+          placeholder="e.g. 20"
+          value={area}
+          onChange={(e) => { setArea(e.target.value); setErrors((er) => ({ ...er, area_sqm: undefined })) }}
+          aria-invalid={!!errors.area_sqm}
+        />
+        {errors.area_sqm && <p className="text-sm text-destructive">{errors.area_sqm}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="name">Name (optional)</Label>
+        <Input
+          id="name"
+          maxLength={NAME_MAX}
+          placeholder="e.g. Back garden"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          aria-invalid={!!errors.name}
+        />
+        {errors.name && <p className="text-sm text-destructive">{errors.name}</p>}
+      </div>
+
+      <Button type="submit" className="w-full" disabled={saving}>
+        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : isEdit ? 'Save changes' : 'Save space'}
+      </Button>
+    </form>
+  )
+}

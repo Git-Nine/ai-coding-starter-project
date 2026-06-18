@@ -1,8 +1,8 @@
 # PROJ-3: Photo Upload & Space Scan
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (architecture designed)
+**Last Updated:** 2026-06-18 (frontend implemented)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — the private, user-namespaced `photos` bucket and the RLS ownership pattern (`user_id = auth.uid()`) this feature's new `scans` table must follow.
@@ -209,6 +209,32 @@ Scan create / read / update / delete run **client-side through Supabase**, exact
 - This feature needs **both** `/frontend` (scan list, scan form with photo picker + preview, scan detail, empty/edit/delete states) and `/backend` (the `scans` table migration + RLS following PROJ-1's pattern, and the reverse-geocoding endpoint).
 - Reuse PROJ-1's `@/lib/supabase/{client,server}` and PROJ-2's signed-URL + fixed-path storage approach.
 - The disabled "Generate plan" control is a placeholder only — PROJ-6 owns its behavior.
+
+## Implementation Notes (Frontend)
+
+**Screens & components built (all behind PROJ-2's auth gate; each page also self-guards via server-side `getUser()`):**
+- `app/scans/page.tsx` (server) — "My spaces" list + empty state. Loads the user's scans, batch-signs thumbnails (`createSignedUrls`, no N+1), renders `components/scans/scan-card.tsx`. Tolerates the `scans` table not existing yet (defaults to an empty list → empty state shows), mirroring PROJ-2's tolerant profile read.
+- `app/scans/new/page.tsx` (server) → `components/scans/scan-form.tsx` (client, create mode).
+- `app/scans/[id]/page.tsx` (server) — scan detail: photo, fact list, **disabled "Generate plan" seam** for PROJ-6, Edit link, Delete. `notFound()` when the scan isn't the user's / doesn't exist (RLS-backed).
+- `app/scans/[id]/edit/page.tsx` (server) → `ScanForm` in edit mode (prefilled; can replace photo).
+- `components/scans/photo-picker.tsx` (client) — dashed dropzone; **Take photo** (`capture="environment"`) + **Library** inputs + desktop drag/drop; preview with replace; HEIC placeholder when the browser can't render it.
+- `components/scans/scan-form.tsx` (client) — the capture pipeline: read EXIF → (GPS present) auto-fill postcode via `/api/geocode` → on save, downscale → upload → insert/update the `scans` row → redirect to detail. Per-field Zod validation.
+- `components/scans/delete-scan-button.tsx` (client) — `AlertDialog` confirm → removes the photo file + the row.
+- `app/page.tsx` — home now has a primary **"Scan a space"** CTA into `/scans`.
+- `lib/scans.ts` — option sets, Zod schema, types, fixed storage-path helper, display helpers. `lib/image.ts` — `readPhotoExif` (via **`exifr`**) and `downscaleImage` (browser canvas, 1600px longest edge → JPEG; HEIC passed through untouched). EXIF is read **before** downscaling (re-encoding strips it).
+
+**Decisions during build:**
+- **Upload happens on Save, not on file-pick** — the file + EXIF are held in the form and only uploaded when the row is written, so an abandoned form never strands a file (tighter than uploading immediately). The scan id is generated client-side (`crypto.randomUUID()`) up front so the storage path and row id match.
+- **Scan CRUD is client-side via RLS** (per the architecture decision), so the only backend route needed is the geocoder.
+- Plain `<img>` (not `next/image`) for previews/thumbnails — avoids remote-domain config and handles `blob:` preview URLs cleanly (Avatar already renders an `<img>`).
+- Upload progress is shown as a busy/spinner state — `supabase-js` v2 `upload()` exposes no progress events, so a real percentage bar isn't available.
+
+**Pending the PROJ-3 backend step (the UI is wired to these contracts):**
+- **`scans` table** following PROJ-1's RLS pattern — owner-only SELECT/INSERT/UPDATE/DELETE (`user_id = auth.uid()`), indexed on `user_id` + `created_at`. Columns the UI reads/writes: `id`, `user_id`, `name`, `photo_path`, `postcode`, `lat`, `lng`, `sun_exposure`, `surface`, `space_type`, `area_sqm`, `taken_at`, `created_at`, `updated_at`. Mirror the client checks server-side (5-digit `postcode`; enum checks for `sun_exposure`/`surface`/`space_type`; `area_sqm` integer 1–5000; `name` ≤ 60). **Until applied, the scans list shows the empty state and saving errors.**
+- **`POST /api/geocode`** — auth-checked; body `{ lat, lng }` → `{ postcode: string | null }`; reverse-geocodes via Nominatim server-side and discards non-Germany results. Until built, the `fetch` fails silently and the user types the postcode (the designed fallback).
+- Storage needs **no change** — photos use the existing private `photos` bucket; PROJ-1's per-user folder policy already covers the `{user_id}/scans/{scan_id}/photo` path.
+
+**Verification:** `tsc --noEmit` clean · `next build` succeeds (`/scans`, `/scans/new`, `/scans/[id]`, `/scans/[id]/edit` + Proxy) · unit tests **26/26** (13 new in `scans.test.ts`: schema validation, photo validation incl. HEIC-by-extension + 10 MB cap, and display/path helpers).
 
 ## QA Test Results
 _To be added by /qa_
