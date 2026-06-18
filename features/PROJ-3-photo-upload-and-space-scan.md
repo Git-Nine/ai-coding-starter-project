@@ -1,8 +1,8 @@
 # PROJ-3: Photo Upload & Space Scan
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (QA — READY: scans isolation proven against two accounts)
+**Last Updated:** 2026-06-18 (Deployed to Vercel — production env vars set; magic-link sign-in verified live)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — the private, user-namespaced `photos` bucket and the RLS ownership pattern (`user_id = auth.uid()`) this feature's new `scans` table must follow.
