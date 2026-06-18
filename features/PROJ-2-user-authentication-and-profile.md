@@ -1,8 +1,8 @@
 # PROJ-2: User Authentication & Profile
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18 (QA — NOT production-ready: 1 High security bug)
+**Last Updated:** 2026-06-18 (re-QA — READY: BUG-1/BUG-7 fixed, two-account ACs verified)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — magic-link auth provider, `users` profile table, RLS, private `photos` bucket, and session-refresh middleware.
@@ -319,7 +319,29 @@ Applied after the QA pass above (branch `proj-2-qa`), with explicit approval for
 
 **Verification (proj-2-qa):** `tsc --noEmit` clean · `next build` green (6 routes + Proxy) · `npm run lint` clean · unit/integration **34/34** (incl. 16 new `safe-return-to` cases) · seeded-auth RLS harness **5/5** (`npm run test:e2e -- --project=rls`).
 
-**Still open before `/deploy`:** re-run `/qa` to confirm the verdict now that BUG-1 + BUG-7 are fixed and the two-account ACs pass; and the **BUG-3 manual add** of `SUPABASE_SERVICE_ROLE_KEY` to `.env.local.example`.
+**Still open before `/deploy`:** the **BUG-3 manual add** of `SUPABASE_SERVICE_ROLE_KEY` to `.env.local.example`.
+
+### Re-QA (2026-06-18) — ✅ PRODUCTION-READY
+
+Re-ran `/qa` on `proj-2-qa` after the fixes. **Verdict: READY** — no Critical or High bugs remain.
+
+**Automated suites (all green):**
+- Unit/integration (Vitest): **34/34** — incl. `safe-return-to.test.ts` (16 cases) regression-locking the BUG-1 open-redirect.
+- E2E (Playwright): **18/18** — 12 route-protection + login-validation on **Chromium** and **Mobile Safari (390px)**; **6** two-account RLS/storage isolation in the seeded-auth `rls` project.
+- `npm run lint` clean (ESLint 9 flat config) · `next build` green (6 routes + Proxy).
+
+**Bug re-verification:**
+- **BUG-1 (High) — FIXED & regression-tested.** Re-audited the redirect guard: `/login?returnTo=/%5Cevil.com` (and `//`, backslash, control-char variants) now resolve to `/`. Centralized in `lib/safe-return-to.ts`; the 16-case unit test guards against drift.
+- **BUG-7 (Critical) — FIXED & verified.** `authenticated`/`service_role` grants on `public.users` confirmed via `has_table_privilege`. The four carried-forward security ACs (AC-3 auto-provision `role='user'`, AC-5 own-row read, AC-6 cross-user write denial, AC-7/8 storage isolation) and the role-escalation guard **pass end-to-end against two real accounts**; the profile own-row update happy-path is now proven at runtime (previously code-only).
+- **BUG-2 / BUG-4 / BUG-5 — FIXED.** **BUG-6** — accepted.
+
+**Security re-audit:** no new findings. Open-redirect closed; owner-only RLS + storage isolation proven against two accounts; `role` self-escalation reverted by the trigger at runtime.
+
+**Remaining (non-blocking, neither Critical/High):**
+- **BUG-3 (Low):** add `SUPABASE_SERVICE_ROLE_KEY` to `.env.local.example` (env files permission-blocked from edits here) — do before `/deploy`.
+- **Manual smoke (recommended at `/deploy`):** real magic-link **email delivery** via the live SMTP isn't auto-testable here — confirm one real inbox round-trip (send link → tap link **and** 6-digit code → land authenticated). The OTP→session mechanism itself is exercised by the harness.
+
+**Status → Approved.**
 
 ## Deployment
 _To be added by /deploy_

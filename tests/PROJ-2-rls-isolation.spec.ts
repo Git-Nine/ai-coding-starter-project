@@ -29,6 +29,10 @@ const stamp = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 
 type SeededUser = { id: string; email: string; client: SupabaseClient }
 
 test.describe('PROJ-2 cross-account RLS + storage isolation (two real accounts)', () => {
+  // Stateful + shares two seeded accounts across tests → run serially in one
+  // worker so beforeAll seeds exactly once (avoids duplicate-email collisions
+  // when fullyParallel would otherwise re-invoke it per worker batch).
+  test.describe.configure({ mode: 'serial' })
   test.skip(!ready, 'Set NEXT_PUBLIC_SUPABASE_URL/ANON_KEY + SUPABASE_SERVICE_ROLE_KEY in .env.local to run')
 
   let admin: SupabaseClient
@@ -66,19 +70,29 @@ test.describe('PROJ-2 cross-account RLS + storage isolation (two real accounts)'
     return { id: created.user.id, email, client }
   }
 
+  // Delete every test account this harness ever creates (by email prefix).
+  // Self-healing: clears stragglers from an interrupted prior run, and is the
+  // teardown. Deleting an auth user cascades its profile row (FK) + storage
+  // files (on_auth_user_deleted trigger).
+  async function purgeTestUsers() {
+    const { data } = await admin.auth.admin.listUsers({ perPage: 200 })
+    const stale = (data?.users ?? []).filter((u) => u.email?.startsWith('proj2.rls.'))
+    for (const u of stale) await admin.auth.admin.deleteUser(u.id)
+  }
+
   test.beforeAll(async () => {
     if (!ready) return
     admin = createClient(url!, serviceKey!, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
+    await purgeTestUsers()
     a = await seed('a')
     b = await seed('b')
   })
 
   test.afterAll(async () => {
-    // Cascades the profile rows (FK) and storage files (on_auth_user_deleted).
-    if (a?.id) await admin.auth.admin.deleteUser(a.id)
-    if (b?.id) await admin.auth.admin.deleteUser(b.id)
+    if (!ready) return
+    await purgeTestUsers()
   })
 
   test('AC-3: first sign-in auto-provisions a profile row with role="user"', async () => {
@@ -97,6 +111,24 @@ test.describe('PROJ-2 cross-account RLS + storage isolation (two real accounts)'
     // B's row is invisible to A even when targeted directly.
     const { data: bRow } = await a.client.from('users').select('id').eq('id', b.id)
     expect(bRow).toEqual([])
+  })
+
+  test('profile happy-path: a user can update and read back their own row', async () => {
+    // Positive control — also guards the grant fix (BUG-7 broke authenticated UPDATE).
+    const { error: updErr } = await a.client
+      .from('users')
+      .update({ display_name: 'My Garden', maintenance_preference: 'low' })
+      .eq('id', a.id)
+    expect(updErr).toBeNull()
+
+    const { data, error } = await a.client
+      .from('users')
+      .select('display_name, maintenance_preference')
+      .eq('id', a.id)
+      .single()
+    expect(error).toBeNull()
+    expect(data?.display_name).toBe('My Garden')
+    expect(data?.maintenance_preference).toBe('low')
   })
 
   test('AC-6: a user cannot modify another user’s profile', async () => {
