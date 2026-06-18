@@ -50,7 +50,7 @@ See `features/INDEX.md` for dependencies and build order.
 - **Admin access:** Role-based — a `role` column on `users`; admin routes gated by `role = 'admin'`.
 - **Geography:** Germany-first. Native species, soil (BGR), hardiness zones, weather (DWD), and nursery deep links scoped to Germany for v1.
 - **External APIs (all free / open data):** BGR (soil), DWD (weather), hardiness zones, FloraWeb/BfN (plant database seeding).
-- **Hosting:** TBD — resolve at `/deploy`.
+- **Hosting:** Vercel (resolved at `/deploy`, 2026-06-18) — GitHub repo auto-deploys on push to `main`; env vars set in the Vercel dashboard.
 - **Design system:** see `docs/design-system.md` — calm reassuring greens + warm neutrals, serif headings + Montserrat body, soft rounded white cards on a cream canvas. Built on Tailwind + shadcn/ui. Visual reference mockups in `docs/design-references/`.
 
 ## Non-Goals (v1)
