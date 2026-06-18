@@ -1,8 +1,8 @@
 # PROJ-3: Photo Upload & Space Scan
 
-## Status: Planned
+## Status: Architected
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-06-18 (architecture designed)
 
 ## Dependencies
 - Requires: **PROJ-1 (Supabase Infrastructure Setup)** — the private, user-namespaced `photos` bucket and the RLS ownership pattern (`user_id = auth.uid()`) this feature's new `scans` table must follow.
@@ -87,9 +87,10 @@
 - **AI-ready shape:** the manual fields and stored photo are structured so a future vision model can populate the same fields without schema or UI changes.
 
 ## Open Questions
-- [x] **Reverse-geocoding EXIF GPS → postcode** — **Resolved (product):** auto-fill the postcode from the photo's GPS, with manual entry/override as the fallback. **Open for `/architecture`:** which free service (e.g. Nominatim/OSM), its rate limits and German-PLZ accuracy, and whether the lookup runs client- or server-side.
-- [x] **Size representation** — **Resolved (product):** capture an approximate area in **square meters** (numeric input), not buckets. **For `/architecture`:** sensible min/max + step, and confirm the m² value suits PROJ-6's rule engine.
-- [ ] **Client-side image downscaling** before upload to ease mobile data/storage — decide at `/architecture`.
+- [x] **Reverse-geocoding EXIF GPS → postcode** — **Resolved (/architecture):** server endpoint using Nominatim (OSM); server-side for rate-limit/app-identity control, caching, CORS-avoidance, and swappability. Manual entry/override always available; non-DE results discarded.
+- [x] **Size representation** — **Resolved (/architecture):** approximate area as a whole number of m², range 1–5000. (Confirm with PROJ-6 that m² suits the rule engine; revisit there if needed.)
+- [x] **Client-side image downscaling** — **Resolved (/architecture):** yes, via the browser canvas (no library); EXIF read before shrinking. HEIC is uploaded as-is (can't be shrunk outside Safari).
+- [ ] **Nominatim at scale** — the public OSM instance is fine for the v1 beta but caps systematic/high-volume use; before scaling, self-host or move to a keyed provider. Revisit alongside PROJ-4's geo/soil/weather lookups.
 
 ## Decision Log
 
@@ -111,13 +112,103 @@
 <!-- Added by /architecture -->
 | Decision | Rationale | Date |
 |----------|-----------|------|
-| _To be added by /architecture_ | | |
+| New `scans` table, owner-only RLS (`user_id = auth.uid()`), following PROJ-1's pattern | Per-user isolation is the project-wide convention; deferred to PROJ-3 by PROJ-1's Out of Scope | 2026-06-18 |
+| Scan CRUD client-side via Supabase (no per-entity API routes) | RLS + storage policy already enforce ownership; mirrors PROJ-2's profile-write decision and avoids redundant routes | 2026-06-18 |
+| Photo at fixed per-scan path `{user_id}/scans/{scan_id}/photo`, overwrite on replace | One image file per scan → no orphan pile-up (same trick as PROJ-2's avatar); deleting a scan removes the file | 2026-06-18 |
+| Scan id generated client-side up front (before upload/save) | Lets the storage folder and DB row share one id, so a failed save can't strand a file | 2026-06-18 |
+| Read EXIF **before** shrinking the image | Canvas re-encoding strips EXIF; GPS/date must be captured from the original first | 2026-06-18 |
+| Client-side image downscale via browser canvas (no library) | Faster mobile uploads + less storage; built-in canvas avoids a dependency | 2026-06-18 |
+| HEIC uploaded as-is with placeholder preview (no client shrink/convert) | HEIC can't be drawn to canvas outside Safari; converting needs a heavy lib — defer to a later enhancement | 2026-06-18 |
+| `exifr` for EXIF reading | Lightweight, browser-friendly, handles JPEG + HEIC metadata incl. GPS | 2026-06-18 |
+| Reverse-geocoding via a **server endpoint** using **Nominatim (OSM)** | Open/free (fits the open-data approach); server-side controls Nominatim's required app-identity + rate limit, enables caching, avoids CORS, and keeps the geo integration swappable for PROJ-4 | 2026-06-18 |
+| Approximate area = whole number of m², range 1–5000 | A residential garden/balcony fits well under 5000 m² (≈half a hectare); whole numbers suit a rough estimate and simplify validation | 2026-06-18 |
+| Photo: JPEG/PNG/WebP/HEIC, ≤10 MB, one per scan; shown via short-lived signed URL | Confirms the spec's product decisions at the technical layer; private bucket → signed URL like PROJ-2 | 2026-06-18 |
 
 ---
 <!-- Sections below are added by subsequent skills -->
 
 ## Tech Design (Solution Architect)
-_To be added by /architecture_
+
+### Screens & Components
+
+```
+/scans  (protected — "My Spaces")
+├── Empty state — "Scan your first space" prompt + [ + New scan ]  ← shown when no scans
+└── Scan list — one card per scan
+    └── Scan card — thumbnail · name/space type · "sun · surface" summary
+
+/scans/new  (protected)
+└── Scan form
+    ├── Photo picker — "Take photo" / "Choose from library" (mobile), drag-drop/browse (desktop)
+    │   ├── Preview + "retake/replace"
+    │   └── Upload progress bar
+    ├── Postcode (PLZ) — auto-filled from the photo's GPS when available, always editable
+    ├── Sun exposure — select (full / partial / shade)
+    ├── Current surface — select (gravel / lawn / soil / paved / mixed)
+    ├── Space type — select (front garden / back garden / balcony / bed)
+    ├── Approximate area — number input, in m²
+    ├── Name (optional)
+    └── Save → /scans/{id}
+
+/scans/{id}  (protected — scan detail)
+├── Photo + all captured fields
+├── [ Generate plan → ]   ← disabled "coming soon" seam; PROJ-6 wires this up
+├── [ Edit ]  → same form, prefilled; can change fields and/or replace the photo
+└── [ Delete ] → confirm dialog → removes the scan row + its photo, back to /scans
+```
+
+Built entirely from **existing** shadcn components (`form`, `input`, `select`, `button`, `card`, `alert-dialog`, `sonner`, `progress`, `skeleton`). No new UI library needed. The whole area sits behind PROJ-2's auth gate (middleware redirects unauthenticated visitors to `/login`).
+
+### Data Model (plain language)
+
+A new **`scans`** table, one row per scanned space, following PROJ-1's owner-only RLS pattern (a user can only ever see and touch their own scans). Each scan holds:
+
+- **Unique ID** — generated up front (before any save) so the photo's storage folder and the database row share the same id
+- **Owner** — the logged-in user it belongs to (the RLS ownership key)
+- **Name** — optional, short; falls back to "space type + date" in the UI when empty
+- **Photo reference** — the path of the photo inside the existing private `photos` bucket (not the image itself)
+- **Postcode** — German PLZ (5 digits)
+- **Latitude / longitude** — optional, from the photo's EXIF GPS; kept so **PROJ-4** can enrich soil/weather/zone without re-asking
+- **Sun exposure** — full / partial / shade
+- **Current surface** — gravel / lawn / soil / paved / mixed
+- **Space type** — front garden / back garden / balcony / bed
+- **Approximate area** — a whole number of square meters
+- **Photo capture date** — optional, from EXIF
+- **Created / updated timestamps**
+
+**The photo image itself** lives in PROJ-1's existing **private `photos` bucket** at a fixed per-scan path (`{user_id}/scans/{scan_id}/photo`) — one image file per scan, overwritten on replace (same anti-orphan trick as PROJ-2's avatar). It's shown via a short-lived **signed URL** because the bucket is private. Deleting a scan removes both the row and that file.
+
+### How the photo pipeline works (plain language)
+
+1. **User picks/takes a photo.** Before anything is uploaded, the app reads the photo's hidden EXIF data (GPS coordinates + capture date) from the *original* file.
+2. **If GPS is present,** the coordinates are sent to a small server endpoint that looks up the postcode (see below) and prefills the field. The user can always correct it.
+3. **The app shrinks the image** to a sensible max dimension in the browser before upload — smaller files mean faster uploads on mobile and less storage. (EXIF is read in step 1 *first*, because shrinking re-saves the image and drops the hidden data.)
+4. **The shrunk image is uploaded** to the user's private folder; on success the scan row is saved. Because the id and folder are fixed up front, a failed save never leaves a stray file to hunt down.
+
+> **HEIC note:** iPhone HEIC photos can't be reliably shrunk or previewed in non-Safari browsers. For v1 HEIC files are uploaded **as-is** and the preview shows a neutral placeholder where the browser can't render them. (Automatic HEIC→JPEG conversion is a possible later enhancement.)
+
+### Postcode auto-fill (the one server-side piece)
+
+A small **server endpoint** turns GPS coordinates into a postcode (reverse geocoding) using **Nominatim (OpenStreetMap)** — a free, open service consistent with the project's open-data approach.
+
+- **Why server-side, not from the browser:** Nominatim's usage rules require an identifying app name and a low request rate; doing it server-side lets us control that, cache repeats, avoid browser cross-origin issues, and keep the integration **swappable** (PROJ-4 will add more Germany geo/soil/weather lookups behind the same kind of seam).
+- **Germany guard:** if the looked-up location isn't in Germany, the prefill is discarded and the user types a German PLZ manually (matches the Germany-first scope).
+- **Always a fallback:** no GPS, a failed lookup, or a timeout simply leaves the field empty for manual entry — it never blocks the scan.
+
+### CRUD placement
+
+Scan create / read / update / delete run **client-side through Supabase**, exactly like PROJ-2's profile writes — owner-only RLS on the `scans` table and the per-user storage policy already enforce the security, so no redundant API routes are built. The **only** new server route is the reverse-geocoding helper above. This keeps the backend surface minimal and consistent with how PROJ-2 was built.
+
+### Dependencies to Install
+- **`exifr`** — reads EXIF GPS + capture date from the chosen photo in the browser (lightweight; handles JPEG and HEIC metadata). The one genuinely new package.
+- **No package for image shrinking** — done with the browser's built-in canvas.
+- **No package for geocoding** — the server endpoint calls Nominatim with the built-in fetch.
+- All required shadcn components and `react-hook-form` + `zod` are already installed.
+
+### Notes for Implementation
+- This feature needs **both** `/frontend` (scan list, scan form with photo picker + preview, scan detail, empty/edit/delete states) and `/backend` (the `scans` table migration + RLS following PROJ-1's pattern, and the reverse-geocoding endpoint).
+- Reuse PROJ-1's `@/lib/supabase/{client,server}` and PROJ-2's signed-URL + fixed-path storage approach.
+- The disabled "Generate plan" control is a placeholder only — PROJ-6 owns its behavior.
 
 ## QA Test Results
 _To be added by /qa_
