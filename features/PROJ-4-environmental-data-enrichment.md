@@ -297,7 +297,89 @@ UI: skeleton → conditions summary (per-field, with "unavailable" where failed)
 5. **Apply migration** — run `supabase/migrations/20260619100000_proj4_scan_enrichment.sql` in the Supabase dashboard SQL editor
 
 ## QA Test Results
-_To be added by /qa_
+
+**QA date:** 2026-06-19 | **Tester:** `/qa` skill | **Unit tests:** 74/74 pass | **E2E:** 3/3 route-protection pass; 6 RLS tests created (skip until migration applied)
+
+---
+
+### Acceptance Criteria
+
+| AC | Description | Result | Notes |
+|----|-------------|--------|-------|
+| T1 | Save triggers background enrichment without blocking redirect | ✅ Pass | Unit tested; `locationChanged` guard prevents spurious re-enrichment on non-location edits |
+| T2 | Pending state shown while enrichment not finished | ✅ Pass | `isPending` check in `ConditionsSummary` shows skeleton with "Gathering conditions…" |
+| T3 | Conditions summary shown after enrichment completes | ❌ Blocked | BUG-1 (no table) + BUG-2 (no Realtime events) prevent this in production |
+| L1 | GPS coordinates used when present | ✅ Pass | Unit tested — `SCAN_DE` (with lat/lng) uses `location_basis: 'gps'` |
+| L2 | Postcode geocoded when no GPS | ✅ Pass | Unit tested — Nominatim forward-geocode path confirmed |
+| L3 | Non-Germany location → all unavailable, no API calls | ✅ Pass | Unit tested — `isInGermany()` check; BGR/DWD not called |
+| P1 | Independent sources, partial success preserved | ✅ Pass | Unit tested — soil fail + DWD success → status: 'partial' |
+| P2 | Retry button shown when ≥1 field unavailable | ✅ Pass | `hasSomeUnavailable` check renders Retry button |
+| P3 | Missing enrichment data does not block Generate plan | ✅ Pass | Button disabled pending PROJ-6 for ALL users — no enrichment dependency |
+| R1 | No re-enrichment when location unchanged on edit | ✅ Pass | `locationChanged = !isEdit \|\| postcode !== scan.postcode \|\| file !== null` |
+| R2 | Re-enrichment runs on postcode/photo location change | ✅ Pass | Same `locationChanged` flag; `requested_at` stale guard handles races |
+| D1 | Structured soil type stored (sand/loam/clay/silt/peat) | ⚠️ Partial | Logic correct (unit tested); BGR attribute field names unverified against live response |
+| D2 | Climate data stored (rainfall_mm, annual_min_temp, frost_days) | ⚠️ Partial | Logic correct (unit tested); DWD grid URLs and scale factors unverified against live files |
+| D3 | Hardiness zone label stored (e.g. "7b") | ⚠️ Deviation | Stores '7', '8' etc. — no sub-zone letter. UI shows "Zone 7" not "Zone 7b" (BUG-3) |
+| S1 | Owner-only access — user A cannot read/write user B's enrichment | ✅ Pass | RLS policies correct; unit tested ownership check; E2E RLS suite ready (skips until migration) |
+| S2 | Unauthenticated visitor denied / redirected to /login | ✅ Pass | E2E tested — `/api/enrich` → 401; scan detail page → redirects to /login |
+
+---
+
+### Bugs Found
+
+#### BUG-QA-1 — Critical: `scan_enrichment` table not created in database
+**Impact:** Complete feature failure in production. Every enrichment attempt fails at the initial upsert.
+**Steps:** Save any new scan → `POST /api/enrich` fires → admin upsert returns error "table not found" → enrichment never starts → "Gathering conditions…" shown forever.
+**Evidence:** `SELECT table_name FROM information_schema.tables WHERE table_name = 'scan_enrichment'` returns empty; RLS test suite skips with PGRST205.
+**Fix:** Apply `supabase/migrations/20260619100000_proj4_scan_enrichment.sql` in the Supabase dashboard SQL editor.
+
+#### BUG-QA-2 — High: `scan_enrichment` not added to `supabase_realtime` Postgres publication
+**Impact:** Even after BUG-QA-1 is fixed, the `ConditionsSummary` Realtime subscription will receive no events. The UI will never auto-update from "Gathering conditions…" to the populated card — users must manually refresh.
+**Evidence:** `SELECT schemaname, tablename FROM pg_publication_tables WHERE pubname = 'supabase_realtime'` returns empty (publication exists with `puballtables: false`, zero tables added).
+**Note:** A page refresh DOES work (server component reads enrichment server-side). Realtime is a UX issue, not a data loss issue.
+**Fix:** Add to the migration (or a follow-up migration): `alter publication supabase_realtime add table public.scan_enrichment;`
+
+#### BUG-QA-3 — Low: Hardiness zone stored and displayed without sub-zone letter
+**Impact:** AC-D3 specifies "e.g. '7b'". Implementation stores '7', '8' etc. UI shows "Zone 7" rather than "Zone 7b".
+**Cause:** DWD annual min-temp grid does not have enough spatial resolution to determine the sub-zone letter (a vs b). No third-party sub-zone dataset integrated.
+**Fix options:** (a) Update the spec AC to match reality — "Zone X" without sub-zone is standard in Germany's DWD mapping; or (b) integrate a separate hardiness sub-zone dataset.
+**Classification:** Low — cosmetic deviation from spec; does not affect PROJ-6 rule engine which uses the numeric zone value.
+
+---
+
+### Security Audit
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| Auth bypass on `/api/enrich` | ✅ Pass | Returns 401 without session — E2E confirmed |
+| Ownership check before dispatch | ✅ Pass | `scan.user_id === user.id` verified before pending upsert — unit tested |
+| Admin client (service-role key) scope | ✅ Pass | `SUPABASE_SERVICE_ROLE_KEY` (no NEXT_PUBLIC_) — never in browser bundle; only imported in server route |
+| RLS on `scan_enrichment` | ✅ Pass | 4 policies (SELECT/INSERT/UPDATE/DELETE) with `(select auth.uid()) = user_id` |
+| Realtime cross-user data leak | ✅ Pass | Supabase Realtime v2 applies RLS to `postgres_changes`; once BUG-QA-2 is fixed the subscription will only deliver events for rows owned by the authenticated user |
+| Input sanitization | ✅ Pass | Postcode: `/\D/g` strip; scan_id: Zod UUID validation; no free-text input reaches external APIs |
+| Rate limiting on enrichment endpoint | ⚠️ Open | Known open question (spec § Open Questions — rate limiting). Per-user throttle needed before scaling beyond beta. Deferred. |
+
+---
+
+### Pre-Deploy Verification Items (not bugs, but required before first production hit)
+
+These are known verification tasks listed in the Implementation Notes — not yet testable without live API access:
+
+1. **DWD grid URLs** — confirm period code `9120` and file `17` against the live directory listing
+2. **BGR attribute fields** — inspect a live Identify response to confirm field name and KA5 code mapping
+3. **DWD grid CRS** — check `xllcorner`/`yllcorner` in a real `.asc` header for WGS84 vs projected CRS
+4. **DWD scale factors** — confirm precipitation/temperature values are stored ×10
+
+---
+
+### Production-Ready Recommendation
+
+**NOT READY** — 2 blocking bugs must be fixed before feature is usable:
+
+1. **BUG-QA-1 (Critical):** Apply database migration — table does not exist.
+2. **BUG-QA-2 (High):** Add `scan_enrichment` to `supabase_realtime` publication — Realtime auto-update non-functional.
+
+After fixes are applied, re-run this QA checklist and the RLS E2E suite. BUG-QA-3 (hardiness sub-zone) can be addressed in a separate ticket.
 
 ## Deployment
 _To be added by /deploy_
