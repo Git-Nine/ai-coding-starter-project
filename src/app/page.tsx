@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { User, Camera } from 'lucide-react'
+import { User, Camera, Leaf } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
 import { Button } from '@/components/ui/button'
@@ -14,15 +14,32 @@ export default async function Home() {
 
   if (!user) redirect('/login')
 
+  // Admins get a discreet entry point to the catalogue; regular users never see it.
+  const { data: profile } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', user.id)
+    .maybeSingle<{ role: 'user' | 'admin' }>()
+  const isAdmin = profile?.role === 'admin'
+
   return (
     <div className="min-h-screen bg-background">
       <header className="mx-auto flex w-full max-w-md items-center justify-between px-4 py-4">
         <Logo />
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/profile">
-            <User className="h-4 w-4" /> Profile
-          </Link>
-        </Button>
+        <div className="flex items-center gap-1">
+          {isAdmin && (
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/admin/plants">
+                <Leaf className="h-4 w-4" /> Plants
+              </Link>
+            </Button>
+          )}
+          <Button asChild variant="ghost" size="sm">
+            <Link href="/profile">
+              <User className="h-4 w-4" /> Profile
+            </Link>
+          </Button>
+        </div>
       </header>
 
       <main className="mx-auto w-full max-w-md px-4 pb-16 pt-6">
