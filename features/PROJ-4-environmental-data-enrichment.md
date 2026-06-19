@@ -1,8 +1,8 @@
 # PROJ-4: Environmental Data Enrichment
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-19 (QA passed — all bugs resolved, 74 unit + 9 E2E tests green)
+**Last Updated:** 2026-06-19 (Deployed to Vercel — production env vars already set from PROJ-1/2/3)
 
 ## Dependencies
 - Requires: **PROJ-3 (Photo Upload & Space Scan)** — enrichment augments a *saved* scan. It reads the scan's `postcode` (always present) and optional `lat`/`lng` (from photo EXIF GPS), and writes the derived environmental data back against that scan.
@@ -387,4 +387,21 @@ Grant migration also required (matches PROJ-3 pattern):
 Remaining pre-deploy verification items (external API response verification) documented in Implementation Notes — required before the first production enrichment hit reaches BGR/DWD.
 
 ## Deployment
-_To be added by /deploy_
+
+**Deployed:** 2026-06-19
+**Platform:** Vercel (auto-deploy from `main` branch — same project as PROJ-1/2/3)
+**Commit:** `345bb33` (pushed to `main` 2026-06-19)
+
+### Database changes applied to production Supabase
+1. `20260619100000_proj4_scan_enrichment.sql` — `scan_enrichment` table, RLS, trigger, index
+2. `20260619100100_proj4_grant_scan_enrichment_privileges.sql` — table-level grants for `authenticated` + `service_role`
+3. `alter publication supabase_realtime add table public.scan_enrichment` — applied directly (Realtime live updates)
+
+### Pre-deploy verification items (status at deploy time)
+- DWD grid URLs, BGR attribute fields, DWD CRS, DWD scale factors — **not yet verified against live external APIs** (requires a real scan in a German postcode to observe first enrichment response). Monitor Vercel function logs after first production enrichment to confirm values are correct.
+
+### Post-deploy checklist
+- [x] `npm run build` clean
+- [x] `npm run lint` clean (added `.claude/`/`.codex/`/`.agents/` to ESLint ignore)
+- [x] Pushed to `main` → Vercel auto-deploy triggered
+- [ ] Verify enrichment runs end-to-end on a real scan (requires testing in production)
