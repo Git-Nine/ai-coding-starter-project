@@ -72,6 +72,30 @@ export type Scan = {
   updated_at: string | null
 }
 
+export type EnrichmentFieldStatus = 'pending' | 'success' | 'unavailable'
+export type EnrichmentOverallStatus = 'pending' | 'complete' | 'partial' | 'failed'
+
+/** A row of public.scan_enrichment as the UI reads it (PROJ-4). */
+export type ScanEnrichment = {
+  id: string
+  scan_id: string
+  user_id: string
+  status: EnrichmentOverallStatus
+  requested_at: string
+  soil_type: 'sand' | 'loam' | 'clay' | 'silt' | 'peat' | null
+  soil_status: EnrichmentFieldStatus
+  rainfall_mm: number | null
+  annual_min_temp: number | null
+  frost_days: number | null
+  climate_status: EnrichmentFieldStatus
+  climate_period: string | null
+  hardiness_zone: string | null
+  zone_status: EnrichmentFieldStatus
+  location_basis: 'gps' | 'postcode_centroid' | null
+  created_at: string
+  updated_at: string | null
+}
+
 export const scanSchema = z.object({
   name: z.string().trim().max(NAME_MAX, `Keep the name under ${NAME_MAX} characters`),
   postcode: z.string().regex(/^\d{5}$/, 'Enter a 5-digit German postcode'),

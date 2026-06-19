@@ -1,8 +1,8 @@
 # PROJ-4: Environmental Data Enrichment
 
-## Status: Architected
+## Status: In Progress
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-19
+**Last Updated:** 2026-06-19 (Frontend built — ConditionsSummary component + scan form enrichment trigger)
 
 ## Dependencies
 - Requires: **PROJ-3 (Photo Upload & Space Scan)** — enrichment augments a *saved* scan. It reads the scan's `postcode` (always present) and optional `lat`/`lng` (from photo EXIF GPS), and writes the derived environmental data back against that scan.

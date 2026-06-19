@@ -162,6 +162,19 @@ export function ScanForm({
       }
 
       toast.success('Space saved.')
+
+      // Trigger environmental enrichment if this is a new scan or the location changed.
+      const locationChanged = !isEdit || postcode !== (scan?.postcode ?? '') || file !== null
+      if (locationChanged) {
+        fetch('/api/enrich', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scan_id: scanId }),
+        }).catch(() => {
+          // Fire-and-forget — enrichment failure never blocks the save flow.
+        })
+      }
+
       router.push(`/scans/${scanId}`)
       router.refresh()
     } catch (err) {

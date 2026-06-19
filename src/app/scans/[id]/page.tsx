@@ -4,6 +4,7 @@ import { ArrowLeft, Pencil, Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
 import { DeleteScanButton } from '@/components/scans/delete-scan-button'
+import { ConditionsSummary } from '@/components/scans/conditions-summary'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -13,6 +14,7 @@ import {
   spaceTypeLabel,
   STORAGE_BUCKET,
   type Scan,
+  type ScanEnrichment,
 } from '@/lib/scans'
 
 export default async function ScanDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -28,11 +30,19 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
   const { data: scan } = await supabase.from('scans').select('*').eq('id', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
-  let photoUrl: string | null = null
-  if (scan.photo_path) {
-    const { data } = await supabase.storage.from(STORAGE_BUCKET).createSignedUrl(scan.photo_path, 3600)
-    photoUrl = data?.signedUrl ?? null
-  }
+  const [photoResult, enrichmentResult] = await Promise.all([
+    scan.photo_path
+      ? supabase.storage.from(STORAGE_BUCKET).createSignedUrl(scan.photo_path, 3600)
+      : Promise.resolve({ data: null }),
+    supabase
+      .from('scan_enrichment')
+      .select('*')
+      .eq('scan_id', id)
+      .maybeSingle<ScanEnrichment>(),
+  ])
+
+  const photoUrl = photoResult.data?.signedUrl ?? null
+  const enrichment = enrichmentResult.data ?? null
 
   const facts = [
     { label: 'Postcode', value: scan.postcode ?? '—' },
@@ -74,6 +84,8 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
             ))}
           </CardContent>
         </Card>
+
+        <ConditionsSummary scanId={scan.id} initialEnrichment={enrichment} />
 
         <div className="mt-6 space-y-2">
           {/* Seam for PROJ-6 (Plan Generation) — intentionally disabled for now. */}
