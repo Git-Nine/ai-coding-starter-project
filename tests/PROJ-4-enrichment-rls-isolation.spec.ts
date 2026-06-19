@@ -31,6 +31,7 @@ function newScan(userId: string, scanId: string) {
   return {
     id: scanId,
     user_id: userId,
+    photo_path: `${userId}/scans/${scanId}/photo`,
     postcode: '10115',
     sun_exposure: 'full',
     surface: 'gravel',

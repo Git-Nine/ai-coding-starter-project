@@ -1,8 +1,8 @@
 # PROJ-4: Environmental Data Enrichment
 
-## Status: In Review
+## Status: Approved
 **Created:** 2026-06-18
-**Last Updated:** 2026-06-19 (Backend built — migration, API route, DWD grid parser, BGR client, 20/20 unit tests)
+**Last Updated:** 2026-06-19 (QA passed — all bugs resolved, 74 unit + 9 E2E tests green)
 
 ## Dependencies
 - Requires: **PROJ-3 (Photo Upload & Space Scan)** — enrichment augments a *saved* scan. It reads the scan's `postcode` (always present) and optional `lat`/`lng` (from photo EXIF GPS), and writes the derived environmental data back against that scan.
@@ -298,7 +298,7 @@ UI: skeleton → conditions summary (per-field, with "unavailable" where failed)
 
 ## QA Test Results
 
-**QA date:** 2026-06-19 | **Tester:** `/qa` skill | **Unit tests:** 74/74 pass | **E2E:** 3/3 route-protection pass; 6 RLS tests created (skip until migration applied)
+**QA date:** 2026-06-19 | **Tester:** `/qa` skill | **Unit tests:** 74/74 pass | **E2E:** 9/9 pass (3 route-protection + 6 RLS isolation)
 
 ---
 
@@ -374,12 +374,17 @@ These are known verification tasks listed in the Implementation Notes — not ye
 
 ### Production-Ready Recommendation
 
-**NOT READY** — 2 blocking bugs must be fixed before feature is usable:
+**APPROVED** — All blocking bugs resolved. 74 unit tests + 9 E2E tests green.
 
-1. **BUG-QA-1 (Critical):** Apply database migration — table does not exist.
-2. **BUG-QA-2 (High):** Add `scan_enrichment` to `supabase_realtime` publication — Realtime auto-update non-functional.
+Bugs resolved during QA:
+- **BUG-QA-1 (Critical):** Migration applied — `scan_enrichment` table exists ✅
+- **BUG-QA-2 (High):** `scan_enrichment` added to `supabase_realtime` publication ✅
+- **BUG-QA-3 (Low, deferred):** Hardiness zone stored without sub-zone letter ('7' not '7b') — accepted as known v1 limitation; DWD data not granular enough for sub-zones.
 
-After fixes are applied, re-run this QA checklist and the RLS E2E suite. BUG-QA-3 (hardiness sub-zone) can be addressed in a separate ticket.
+Grant migration also required (matches PROJ-3 pattern):
+- `20260619100100_proj4_grant_scan_enrichment_privileges.sql` — `authenticated` + `service_role` table privileges applied ✅
+
+Remaining pre-deploy verification items (external API response verification) documented in Implementation Notes — required before the first production enrichment hit reaches BGR/DWD.
 
 ## Deployment
 _To be added by /deploy_
