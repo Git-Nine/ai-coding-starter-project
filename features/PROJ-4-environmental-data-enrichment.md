@@ -39,7 +39,7 @@
 ### Triggering enrichment
 - [ ] Given a logged-in user saves a new scan, when the save succeeds, then environmental enrichment starts automatically in the background and the save/redirect is **not** blocked by it.
 - [ ] Given a scan whose enrichment has not finished, when the user views the scan detail, then a "Gathering conditions…" pending state is shown in place of the conditions summary.
-- [ ] Given enrichment completes, when the user is on (or returns to) the scan detail, then the compact "Your conditions" summary (soil, hardiness zone, climate) is shown with the available values.
+- [ ] Given enrichment completes, when the user is on (or returns to) the scan detail, then the compact "Your conditions" summary (soil, climate: rainfall · coldest winter low · frost days) is shown with the available values. *(Hardiness zone is **not** displayed — see Product Decisions 2026-06-19; it is still stored and used by PROJ-6.)*
 
 ### Location basis
 - [ ] Given a scan whose photo had GPS (`lat`/`lng` present), when enrichment runs, then the precise coordinates are used for the lookups.
@@ -109,6 +109,7 @@
 | **"Weather" = long-term climate characterisation (normals), not live/forecast weather** | Planting decisions depend on rainfall/frost/min-temp patterns, not today's conditions; also keeps live-weather/nudges (a v2 non-goal) out of scope | 2026-06-18 |
 | v1 data set: **soil type** (sand/loam/clay/silt/peat, +optional pH band), **climate** (avg annual rainfall mm, typical annual min °C, frost window), **hardiness zone** label | Scoped to what a planting rule engine (PROJ-6) needs to filter plants; richer signals (moisture, sun-hours, temp curves) deferred until PROJ-6 proves the need | 2026-06-18 |
 | **No manual override** of enriched values in v1 (only location is user-editable) | Trust the open-data sources; editing location already covers correcting a wrong result; hand-editing soil/zone adds UI and ambiguity for little MVP value | 2026-06-18 |
+| **Hardiness zone removed from the conditions UI** (post-deploy) — still derived, stored, and available to PROJ-6 | The zone is derived 1:1 from the annual-minimum temperature already shown, so displaying both is redundant; Germany spans only ~7a/7b, so a zone label adds little signal and the earlier "Zone 10"-type values were misleading. Showing the raw annual minimum (°C) is the more honest, evidence-based reading (Thomas) and less jargon for Maya. Soil promoted to a full-width tile to keep the layout balanced | 2026-06-19 |
 
 ### Technical Decisions
 <!-- Added by /architecture -->

@@ -68,8 +68,7 @@ export function ConditionsSummary({
   const isPending = !enrichment || enrichment.status === 'pending'
   const hasSomeUnavailable =
     enrichment?.soil_status === 'unavailable' ||
-    enrichment?.climate_status === 'unavailable' ||
-    enrichment?.zone_status === 'unavailable'
+    enrichment?.climate_status === 'unavailable'
 
   return (
     <Card className="mt-5">
@@ -80,20 +79,12 @@ export function ConditionsSummary({
           <PendingSkeleton />
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3">
-              <ConditionTile
-                icon={<Leaf className="h-3.5 w-3.5" />}
-                label="Soil"
-                value={enrichment.soil_type ? capitalize(enrichment.soil_type) : null}
-                status={enrichment.soil_status}
-              />
-              <ConditionTile
-                icon={<Thermometer className="h-3.5 w-3.5" />}
-                label="Zone"
-                value={enrichment.hardiness_zone ? `Zone ${enrichment.hardiness_zone}` : null}
-                status={enrichment.zone_status}
-              />
-            </div>
+            <ConditionTile
+              icon={<Leaf className="h-3.5 w-3.5" />}
+              label="Soil"
+              value={enrichment.soil_type ? capitalize(enrichment.soil_type) : null}
+              status={enrichment.soil_status}
+            />
 
             <div className="mt-3 overflow-hidden rounded-xl border border-border">
               <ClimateRow
@@ -108,7 +99,7 @@ export function ConditionsSummary({
               />
               <ClimateRow
                 icon={<Thermometer className="h-4 w-4 text-accent" />}
-                label="Annual minimum"
+                label="Coldest winter low"
                 value={
                   enrichment.climate_status === 'success' && enrichment.annual_min_temp != null
                     ? `${enrichment.annual_min_temp > 0 ? '+' : ''}${enrichment.annual_min_temp} °C`
@@ -156,10 +147,7 @@ export function ConditionsSummary({
 function PendingSkeleton() {
   return (
     <div className="space-y-3" role="status" aria-label="Gathering conditions">
-      <div className="grid grid-cols-2 gap-3">
-        <Skeleton className="h-[60px] rounded-xl" />
-        <Skeleton className="h-[60px] rounded-xl" />
-      </div>
+      <Skeleton className="h-[60px] rounded-xl" />
       <Skeleton className="h-[108px] rounded-xl" />
       <p className="text-center text-sm text-muted-foreground">Gathering conditions…</p>
     </div>
