@@ -31,17 +31,15 @@ const bodySchema = z.object({
 const DE_BOUNDS = { minLng: 5.87, maxLng: 15.04, minLat: 47.27, maxLat: 55.09 }
 
 // ─── DWD grid URLs ──────────────────────────────────────────────────────────
-// Period code 9120 = 1991–2020 (two-digit start + two-digit end, DWD convention).
 // File 17 = annual aggregate (01–12 monthly, 13–16 seasonal, 17 annual).
-// VERIFY these URLs against the actual directory listing before first deploy:
-//   https://opendata.dwd.de/climate_environment/CDC/grids_germany/multi_annual/
+// Directory name uses "air_temperature_min" but the filename uses "air_temp_min"
+// — verified against the live directory listing 2026-06-19.
 const DWD_BASE = 'https://opendata.dwd.de/climate_environment/CDC/grids_germany/multi_annual'
-const DWD_PERIOD = '9120'
 
 const DWD_URLS = {
-  precipitation: `${DWD_BASE}/precipitation/grids_germany_multi_annual_precipitation_${DWD_PERIOD}_17.asc.gz`,
-  minTemp:       `${DWD_BASE}/air_temperature_min/grids_germany_multi_annual_air_temperature_min_${DWD_PERIOD}_17.asc.gz`,
-  frostDays:     `${DWD_BASE}/frost_days/grids_germany_multi_annual_frost_days_${DWD_PERIOD}_17.asc.gz`,
+  precipitation: `${DWD_BASE}/precipitation/grids_germany_multi_annual_precipitation_1991-2020_17.asc.gz`,
+  minTemp:       `${DWD_BASE}/air_temperature_min/grids_germany_multi_annual_air_temp_min_1991-2020_17.asc.gz`,
+  frostDays:     `${DWD_BASE}/frost_days/grids_germany_multi_annual_frost_days_1991-2020_17.asc.gz`,
 } as const
 
 // DWD grids store values in tenths of the unit (°C×10, mm×10); frost days are whole.
