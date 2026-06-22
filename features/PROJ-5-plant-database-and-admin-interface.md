@@ -1,6 +1,6 @@
 # PROJ-5: Plant Database & Admin Interface
 
-## Status: Approved
+## Status: Deployed
 **Created:** 2026-06-19
 **Last Updated:** 2026-06-20
 

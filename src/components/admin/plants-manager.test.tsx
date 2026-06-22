@@ -21,6 +21,7 @@ function plant(overrides: Partial<Plant> = {}): Plant {
     mature_height_cm: 60,
     mature_spread_cm: 60,
     maintenance_level: 'low',
+    plant_type: 'shrub',
     native: false,
     image_url: null,
     care_notes: null,

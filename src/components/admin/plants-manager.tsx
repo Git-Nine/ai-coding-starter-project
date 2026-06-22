@@ -7,6 +7,7 @@ import {
   SUN_OPTIONS,
   MAINTENANCE_OPTIONS,
   maintenanceLabel,
+  plantTypeLabel,
   sunToleranceSummary,
   type Plant,
 } from '@/lib/plants'
@@ -111,6 +112,7 @@ export function PlantsManager({ plants }: { plants: Plant[] }) {
           <TableHeader>
             <TableRow>
               <TableHead>Plant</TableHead>
+              <TableHead>Type</TableHead>
               <TableHead>Sun</TableHead>
               <TableHead>Maintenance</TableHead>
               <TableHead>Native</TableHead>
@@ -120,7 +122,7 @@ export function PlantsManager({ plants }: { plants: Plant[] }) {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
                   No plants match your search or filters.
                 </TableCell>
               </TableRow>
@@ -130,6 +132,9 @@ export function PlantsManager({ plants }: { plants: Plant[] }) {
                   <TableCell>
                     <div className="font-medium">{p.common_name}</div>
                     <div className="text-xs italic text-muted-foreground">{p.latin_name}</div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline">{plantTypeLabel(p.plant_type)}</Badge>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {sunToleranceSummary(p.sun_tolerance)}

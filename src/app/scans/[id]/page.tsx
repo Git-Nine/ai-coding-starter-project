@@ -5,6 +5,8 @@ import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
 import { DeleteScanButton } from '@/components/scans/delete-scan-button'
 import { ConditionsSummary } from '@/components/scans/conditions-summary'
+import { GeneratePlanButton } from '@/components/plans/generate-plan-button'
+import { PLANS_TABLE } from '@/lib/plans'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -30,7 +32,7 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
   const { data: scan } = await supabase.from('scans').select('*').eq('id', id).maybeSingle<Scan>()
   if (!scan) notFound()
 
-  const [photoResult, enrichmentResult] = await Promise.all([
+  const [photoResult, enrichmentResult, planResult] = await Promise.all([
     scan.photo_path
       ? supabase.storage.from(STORAGE_BUCKET).createSignedUrl(scan.photo_path, 3600)
       : Promise.resolve({ data: null }),
@@ -39,10 +41,13 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
       .select('*')
       .eq('scan_id', id)
       .maybeSingle<ScanEnrichment>(),
+    // Tolerates the plans table not existing yet → treated as "no plan".
+    supabase.from(PLANS_TABLE).select('id').eq('scan_id', id).maybeSingle<{ id: string }>(),
   ])
 
   const photoUrl = photoResult.data?.signedUrl ?? null
   const enrichment = enrichmentResult.data ?? null
+  const hasPlan = !!planResult.data
 
   const facts = [
     { label: 'Postcode', value: scan.postcode ?? '—' },
@@ -88,12 +93,19 @@ export default async function ScanDetailPage({ params }: { params: Promise<{ id:
         <ConditionsSummary scanId={scan.id} initialEnrichment={enrichment} />
 
         <div className="mt-6 space-y-2">
-          {/* Seam for PROJ-6 (Plan Generation) — intentionally disabled for now. */}
-          <Button type="button" className="w-full" disabled aria-disabled>
-            <Sparkles className="h-4 w-4" /> Generate plan
-          </Button>
+          {hasPlan ? (
+            <Button asChild className="w-full">
+              <Link href={`/scans/${scan.id}/plan`}>
+                <Sparkles className="h-4 w-4" /> View planting plan
+              </Link>
+            </Button>
+          ) : (
+            <GeneratePlanButton scan={scan} enrichment={enrichment} userId={user.id} />
+          )}
           <p className="text-center text-xs text-muted-foreground">
-            Personalised planting plans are coming soon.
+            {hasPlan
+              ? 'Your personalised planting plan is ready.'
+              : 'Generate a personalised planting plan for this space.'}
           </p>
         </div>
 

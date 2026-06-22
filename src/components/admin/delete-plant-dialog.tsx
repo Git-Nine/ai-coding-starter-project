@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
-import { PLANTS_TABLE, type Plant } from '@/lib/plants'
+import { type Plant } from '@/lib/plants'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -30,8 +30,10 @@ import {
 /**
  * Deleting a plant ALWAYS requires choosing a different existing plant as its
  * replacement (PROJ-5 deletion contract). Confirm stays disabled until one is
- * picked. In PROJ-5 this performs the hard delete only; reassigning plan_plants
- * rows to the replacement + notifying affected users activates with PROJ-6/7.
+ * picked. PROJ-6: this now calls the admin-only `reassign_and_delete_plant` RPC,
+ * which re-points any plan_plants rows to the replacement and then hard-deletes
+ * the plant atomically — so no plan is ever orphaned. The in-app "your plan was
+ * updated" notification to affected users activates with PROJ-7.
  */
 export function DeletePlantDialog({
   plant,
@@ -57,7 +59,12 @@ export function DeletePlantDialog({
     if (!replacement) return
     setDeleting(true)
     try {
-      const { error } = await supabase.from(PLANTS_TABLE).delete().eq('id', plant.id)
+      // PROJ-6: re-point any plans using this plant to the replacement, then hard-delete
+      // — atomically, admin-gated, in one trusted DB function.
+      const { error } = await supabase.rpc('reassign_and_delete_plant', {
+        target_plant_id: plant.id,
+        replacement_plant_id: replacement.id,
+      })
       if (error) throw error
       toast.success(`Deleted “${plant.common_name}.”`)
       onOpenChange(false)

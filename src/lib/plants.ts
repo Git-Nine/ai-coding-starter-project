@@ -29,6 +29,22 @@ export const SOIL_OPTIONS = [
 export type Soil = (typeof SOIL_OPTIONS)[number]['value']
 export type MaintenanceLevel = (typeof MAINTENANCE_OPTIONS)[number]['value']
 
+/**
+ * Structural planting layers (PROJ-6). Drives the ~60/30/10 layered plan
+ * composition and the grouped plan view (Trees · Shrubs · Perennials · Groundcovers).
+ */
+export const PLANT_TYPE_OPTIONS = [
+  { value: 'groundcover', label: 'Groundcover', plural: 'Groundcovers' },
+  { value: 'perennial', label: 'Perennial', plural: 'Perennials' },
+  { value: 'shrub', label: 'Shrub', plural: 'Shrubs' },
+  { value: 'tree', label: 'Tree', plural: 'Trees' },
+] as const
+
+export type PlantType = (typeof PLANT_TYPE_OPTIONS)[number]['value']
+
+/** Display / iteration order for layered plans — tallest layer first. */
+export const LAYER_DISPLAY_ORDER: PlantType[] = ['tree', 'shrub', 'perennial', 'groundcover']
+
 /** Whole-number hardiness zones (aligned to PROJ-4's output). Germany sits ~5–8; the
  *  wider range lets the catalogue hold hardier (lower-min-zone) plants too. */
 export const ZONE_MIN = 1
@@ -55,6 +71,7 @@ export type Plant = {
   mature_height_cm: number
   mature_spread_cm: number
   maintenance_level: MaintenanceLevel
+  plant_type: PlantType
   native: boolean
   image_url: string | null
   care_notes: string | null
@@ -97,12 +114,16 @@ export const plantSchema = z.object({
   maintenance_level: z.enum(['low', 'medium', 'high'], {
     message: 'Choose a maintenance level',
   }),
+  plant_type: z.enum(['groundcover', 'perennial', 'shrub', 'tree'], {
+    message: 'Choose the plant type',
+  }),
   native: z.boolean(),
   image_url: z
     .string()
     .trim()
     .optional()
-    .refine((v) => !v || z.string().url().safeParse(v).success, 'Enter a valid URL (https://…)'),
+    // BUG-2 fix: http(s) only — `z.string().url()` also accepts javascript:/data:.
+    .refine((v) => !v || isHttpUrl(v), 'Enter a valid http(s) URL (https://…)'),
   care_notes: z
     .string()
     .trim()
@@ -116,10 +137,37 @@ const MAINTENANCE_LABELS = Object.fromEntries(
   MAINTENANCE_OPTIONS.map((o) => [o.value, o.label]),
 ) as Record<MaintenanceLevel, string>
 
+const PLANT_TYPE_LABELS = Object.fromEntries(
+  PLANT_TYPE_OPTIONS.map((o) => [o.value, o.label]),
+) as Record<PlantType, string>
+const PLANT_TYPE_PLURALS = Object.fromEntries(
+  PLANT_TYPE_OPTIONS.map((o) => [o.value, o.plural]),
+) as Record<PlantType, string>
+
 export const soilLabel = (v: Soil) => SOIL_LABELS[v] ?? v
 export const maintenanceLabel = (v: MaintenanceLevel) => MAINTENANCE_LABELS[v] ?? v
+export const plantTypeLabel = (v: PlantType) => PLANT_TYPE_LABELS[v] ?? v
+export const plantTypePlural = (v: PlantType) => PLANT_TYPE_PLURALS[v] ?? v
 
 /** "Full sun · Partial sun" — the joined human labels for a plant's tolerated set. */
 export function sunToleranceSummary(values: SunExposure[]): string {
   return values.map(sunLabel).join(' · ')
+}
+
+/**
+ * True only for well-formed http(s) URLs — blocks `javascript:`/`data:` schemes
+ * (PROJ-5 BUG-2). Used by `plantSchema` and the safe-image guard below.
+ */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value.trim())
+    return u.protocol === 'http:' || u.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/** Returns the URL only when it is a safe http(s) URL, else null (render guard). */
+export function safeImageUrl(value: string | null | undefined): string | null {
+  return value && isHttpUrl(value) ? value.trim() : null
 }

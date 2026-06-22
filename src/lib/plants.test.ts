@@ -26,6 +26,7 @@ const valid = {
   mature_height_cm: 60,
   mature_spread_cm: 60,
   maintenance_level: 'low',
+  plant_type: 'shrub',
   native: false,
   image_url: '',
   care_notes: '',
@@ -89,6 +90,18 @@ describe('plantSchema — required field validation', () => {
   it('rejects an invalid maintenance level', () => {
     expect(plantSchema.safeParse({ ...valid, maintenance_level: 'extreme' }).success).toBe(false)
   })
+
+  it('rejects a missing or invalid plant type', () => {
+    const { plant_type: _omit, ...withoutType } = valid
+    expect(plantSchema.safeParse(withoutType).success).toBe(false)
+    expect(plantSchema.safeParse({ ...valid, plant_type: 'cactus' }).success).toBe(false)
+  })
+
+  it('accepts every valid plant type', () => {
+    for (const t of ['groundcover', 'perennial', 'shrub', 'tree']) {
+      expect(plantSchema.safeParse({ ...valid, plant_type: t }).success).toBe(true)
+    }
+  })
 })
 
 describe('plantSchema — numeric bounds', () => {
@@ -117,15 +130,15 @@ describe('plantSchema — image URL validation', () => {
   it('rejects a malformed URL', () => {
     const r = plantSchema.safeParse({ ...valid, image_url: 'not a url' })
     expect(r.success).toBe(false)
-    if (!r.success) expect(r.error.flatten().fieldErrors.image_url?.[0]).toMatch(/valid URL/i)
+    if (!r.success) expect(r.error.flatten().fieldErrors.image_url?.[0]).toMatch(/valid/i)
   })
 
-  // BUG-2 (Low): z.string().url() accepts non-http(s) schemes like javascript:/data:.
-  // Documented here so the behaviour is visible; harmless in PROJ-5 (image_url is
-  // never rendered) but PROJ-6/7/8 must render with an http(s) guard. See QA findings.
-  it('DOCUMENTS that javascript: scheme currently passes URL validation', () => {
-    const r = plantSchema.safeParse({ ...valid, image_url: 'javascript:alert(1)' })
-    expect(r.success).toBe(true)
+  // BUG-2 fix (PROJ-6): http(s) only — javascript:/data: schemes are now rejected
+  // at the schema (and a DB CHECK in /backend), since PROJ-6 is the first feature
+  // to actually render the plant image.
+  it('rejects non-http(s) schemes (javascript: / data:)', () => {
+    expect(plantSchema.safeParse({ ...valid, image_url: 'javascript:alert(1)' }).success).toBe(false)
+    expect(plantSchema.safeParse({ ...valid, image_url: 'data:text/html,<script>' }).success).toBe(false)
   })
 })
 

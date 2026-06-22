@@ -9,6 +9,7 @@ import {
   SUN_OPTIONS,
   SOIL_OPTIONS,
   MAINTENANCE_OPTIONS,
+  PLANT_TYPE_OPTIONS,
   ZONE_OPTIONS,
   COMMON_NAME_MAX,
   LATIN_NAME_MAX,
@@ -44,6 +45,7 @@ type FieldKey =
   | 'mature_height_cm'
   | 'mature_spread_cm'
   | 'maintenance_level'
+  | 'plant_type'
   | 'image_url'
   | 'care_notes'
 
@@ -62,6 +64,7 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
   const [height, setHeight] = useState<string>(plant ? String(plant.mature_height_cm) : '')
   const [spread, setSpread] = useState<string>(plant ? String(plant.mature_spread_cm) : '')
   const [maintenance, setMaintenance] = useState<string>(plant?.maintenance_level ?? '')
+  const [plantType, setPlantType] = useState<string>(plant?.plant_type ?? '')
   const [native, setNative] = useState<boolean>(plant?.native ?? false)
   const [imageUrl, setImageUrl] = useState(plant?.image_url ?? '')
   const [careNotes, setCareNotes] = useState(plant?.care_notes ?? '')
@@ -86,6 +89,7 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
       mature_height_cm: height === '' ? NaN : Number(height),
       mature_spread_cm: spread === '' ? NaN : Number(spread),
       maintenance_level: maintenance,
+      plant_type: plantType,
       native,
       image_url: imageUrl,
       care_notes: careNotes,
@@ -113,6 +117,7 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
       mature_height_cm: parsed.data.mature_height_cm,
       mature_spread_cm: parsed.data.mature_spread_cm,
       maintenance_level: parsed.data.maintenance_level,
+      plant_type: parsed.data.plant_type,
       native: parsed.data.native,
       image_url: parsed.data.image_url?.trim() || null,
       care_notes: parsed.data.care_notes?.trim() || null,
@@ -269,6 +274,22 @@ export function PlantForm({ plant }: { plant: Plant | null }) {
           </SelectContent>
         </Select>
         {errors.maintenance_level && <p className="text-sm text-destructive">{errors.maintenance_level}</p>}
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="plant_type">Plant type</Label>
+        <Select value={plantType} onValueChange={(v) => { setPlantType(v); clearError('plant_type') }}>
+          <SelectTrigger id="plant_type" aria-invalid={!!errors.plant_type}>
+            <SelectValue placeholder="Structural layer" />
+          </SelectTrigger>
+          <SelectContent>
+            {PLANT_TYPE_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">Sets the plant’s layer in generated plans (groundcover · perennial · shrub · tree).</p>
+        {errors.plant_type && <p className="text-sm text-destructive">{errors.plant_type}</p>}
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3">

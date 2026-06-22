@@ -37,4 +37,9 @@ describe('seed-plants data', () => {
       PLANTS.some((p: { sun_tolerance: string[] }) => p.sun_tolerance.includes('shade')),
     ).toBe(true)
   })
+
+  it('covers more than one structural layer (PROJ-6 layered plans)', () => {
+    const types = new Set(PLANTS.map((p: { plant_type: string }) => p.plant_type))
+    expect(types.size).toBeGreaterThan(1)
+  })
 })

@@ -38,6 +38,7 @@ function newPlant(latin: string, overrides: Record<string, unknown> = {}) {
     mature_height_cm: 50,
     mature_spread_cm: 40,
     maintenance_level: 'low',
+    plant_type: 'perennial', // required since PROJ-6
     native: false,
     ...overrides,
   }
