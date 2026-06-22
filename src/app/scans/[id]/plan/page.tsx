@@ -3,10 +3,18 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { Logo } from '@/components/brand/logo'
-import { PlanView } from '@/components/plans/plan-view'
-import { GeneratePlanButton } from '@/components/plans/generate-plan-button'
+import { PlanEditor } from '@/components/plans/plan-editor'
 import { scanTitle, type Scan, type ScanEnrichment } from '@/lib/scans'
-import { PLANS_TABLE, PLAN_PLANTS_TABLE, type Plan, type PlanPlantWithPlant } from '@/lib/plans'
+import { PLANTS_TABLE, type Plant, type MaintenanceLevel } from '@/lib/plants'
+import {
+  PLANS_TABLE,
+  PLAN_PLANTS_TABLE,
+  mergeDuplicateLines,
+  isPlanStale,
+  type Plan,
+  type PlanPlantWithPlant,
+} from '@/lib/plans'
+import { matchingSurvivors } from '@/lib/plan-engine'
 
 export default async function PlanPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -29,17 +37,25 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
     .maybeSingle<Plan>()
   if (!plan) redirect(`/scans/${id}`)
 
-  const [linesResult, enrichmentResult] = await Promise.all([
-    supabase
-      .from(PLAN_PLANTS_TABLE)
-      .select('*, plants(*)')
-      .eq('plan_id', plan.id)
-      .order('sort_order'),
+  const [linesResult, enrichmentResult, profileResult, catalogueResult] = await Promise.all([
+    supabase.from(PLAN_PLANTS_TABLE).select('*, plants(*)').eq('plan_id', plan.id).order('sort_order'),
     supabase.from('scan_enrichment').select('*').eq('scan_id', id).maybeSingle<ScanEnrichment>(),
+    supabase
+      .from('users')
+      .select('maintenance_preference')
+      .eq('id', user.id)
+      .maybeSingle<{ maintenance_preference: MaintenanceLevel | null }>(),
+    supabase.from(PLANTS_TABLE).select('*'),
   ])
 
-  const lines = (linesResult.data ?? []) as PlanPlantWithPlant[]
+  const lines = mergeDuplicateLines((linesResult.data ?? []) as PlanPlantWithPlant[])
   const enrichment = enrichmentResult.data ?? null
+  const maintenancePreference = profileResult.data?.maintenance_preference ?? null
+  const catalogue = (catalogueResult.data ?? []) as Plant[]
+
+  // Plants that suit the space (for the "add more" list) and whether the plan is stale.
+  const allSurvivors = matchingSurvivors({ scan, enrichment, catalogue })
+  const stale = isPlanStale(plan, { scan, enrichment, maintenancePreference })
 
   return (
     <div className="min-h-screen bg-background">
@@ -59,20 +75,15 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
         <h1 className="mt-1 text-3xl">Your planting plan</h1>
 
         <div className="mt-6">
-          <PlanView plan={plan} lines={lines} scanId={id} />
-        </div>
-
-        <div className="mt-8">
-          <GeneratePlanButton
+          <PlanEditor
+            plan={plan}
+            initialLines={lines}
+            allSurvivors={allSurvivors}
             scan={scan}
             enrichment={enrichment}
             userId={user.id}
-            label="Regenerate plan"
-            variant="secondary"
+            isStale={stale}
           />
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            Regenerating rebuilds the plan from your current conditions.
-          </p>
         </div>
       </main>
     </div>

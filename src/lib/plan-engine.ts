@@ -88,6 +88,101 @@ export function richnessForArea(areaSqm: number): number {
   return Math.min(RICHNESS_CEILING, Math.max(RICHNESS_FLOOR, raw))
 }
 
+/** The site's soil bucket from enrichment, or null when not successfully derived. */
+export function siteSoil(enrichment: GeneratePlanInput['enrichment']): Soil | null {
+  return enrichment && enrichment.soil_status === 'success' ? enrichment.soil_type : null
+}
+
+/** The site's whole-number hardiness zone from enrichment, or null when unconfirmed. */
+export function siteZone(enrichment: GeneratePlanInput['enrichment']): number | null {
+  const parsed =
+    enrichment && enrichment.zone_status === 'success' && enrichment.hardiness_zone != null
+      ? Number.parseInt(enrichment.hardiness_zone, 10)
+      : NaN
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+/**
+ * The plants that pass the site's HARD filters (sun, winter zone, physical fit) —
+ * the pool PROJ-6 builds a plan from and PROJ-7 offers as "more plants that suit
+ * your space." Shared by generation and editing so both use one filter.
+ */
+export function matchingSurvivors(
+  input: Pick<GeneratePlanInput, 'scan' | 'enrichment' | 'catalogue'>,
+): Plant[] {
+  const { scan, enrichment, catalogue } = input
+  const zone = siteZone(enrichment)
+  const area = scan.area_sqm
+  return catalogue.filter(
+    (p) =>
+      p.sun_tolerance.includes(scan.sun_exposure) &&
+      (zone === null || zone >= p.min_hardiness_zone) &&
+      footprintSqm(p) <= area,
+  )
+}
+
+/**
+ * PROJ-7 rebalance: given a FIXED set of plants (the user's edited selection) and a
+ * map of pinned plant_id → quantity, compute every plant's quantity. Pinned plants
+ * keep their value; un-pinned plants re-fill the area their layer's pinned plants
+ * don't claim, using the same per-layer footprint maths as generation. Returns a
+ * plant_id → quantity map. Pure.
+ */
+export function computeQuantities(input: {
+  plants: Pick<Plant, 'id' | 'plant_type' | 'mature_spread_cm'>[]
+  areaSqm: number
+  surface: Surface
+  pinned: Record<string, number>
+}): Record<string, number> {
+  const { plants, areaSqm, surface, pinned } = input
+  const density = surface === 'gravel' || surface === 'paved' ? PAVED_DENSITY_FACTOR : 1
+  const present = LAYER_DISPLAY_ORDER.filter((l) => plants.some((p) => p.plant_type === l))
+  const totalWeight = present.reduce((s, l) => s + LAYER_WEIGHT[l], 0) || 1
+
+  const result: Record<string, number> = {}
+  for (const layer of present) {
+    const inLayer = plants.filter((p) => p.plant_type === layer)
+    const layerArea = (areaSqm * LAYER_WEIGHT[layer]) / totalWeight
+    const pinnedInLayer = inLayer.filter((p) => pinned[p.id] != null)
+    const unpinnedInLayer = inLayer.filter((p) => pinned[p.id] == null)
+    const pinnedClaim = pinnedInLayer.reduce((s, p) => s + pinned[p.id] * footprintSqm(p), 0)
+    const remaining = Math.max(0, layerArea - pinnedClaim)
+    const perArea = unpinnedInLayer.length ? remaining / unpinnedInLayer.length : 0
+    for (const p of pinnedInLayer) result[p.id] = Math.max(1, Math.round(pinned[p.id]))
+    for (const p of unpinnedInLayer) {
+      result[p.id] = Math.max(1, Math.round((perArea / footprintSqm(p)) * density))
+    }
+  }
+
+  // Global cap — scale DOWN the un-pinned quantities only (pinned values are the
+  // user's explicit choice and are preserved).
+  let total = Object.values(result).reduce((s, q) => s + q, 0)
+  if (total > TOTAL_QUANTITY_CAP) {
+    const pinnedTotal = plants
+      .filter((p) => pinned[p.id] != null)
+      .reduce((s, p) => s + result[p.id], 0)
+    const budget = Math.max(0, TOTAL_QUANTITY_CAP - pinnedTotal)
+    const unpinned = plants.filter((p) => pinned[p.id] == null)
+    const unpinnedTotal = unpinned.reduce((s, p) => s + result[p.id], 0)
+    if (unpinnedTotal > budget && unpinnedTotal > 0) {
+      const factor = budget / unpinnedTotal
+      for (const p of unpinned) result[p.id] = Math.max(1, Math.floor(result[p.id] * factor))
+    }
+    total = Object.values(result).reduce((s, q) => s + q, 0)
+    let guard = 0
+    while (total > TOTAL_QUANTITY_CAP && guard++ < 100000) {
+      let largest: string | null = null
+      for (const p of unpinned) {
+        if (result[p.id] > 1 && (largest === null || result[p.id] > result[largest])) largest = p.id
+      }
+      if (!largest) break
+      result[largest] -= 1
+      total -= 1
+    }
+  }
+  return result
+}
+
 function layerEligible(layer: PlantType, areaSqm: number): boolean {
   if (layer === 'groundcover' || layer === 'perennial') return true
   if (layer === 'shrub') return areaSqm >= SHRUB_MIN_AREA_SQM
@@ -191,13 +286,8 @@ function applyCap(lines: GeneratedLine[], cap: number): void {
 export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
   const { scan, enrichment, catalogue, maintenancePreference } = input
 
-  const soil: Soil | null =
-    enrichment && enrichment.soil_status === 'success' ? enrichment.soil_type : null
-  const parsedZone =
-    enrichment && enrichment.zone_status === 'success' && enrichment.hardiness_zone != null
-      ? Number.parseInt(enrichment.hardiness_zone, 10)
-      : NaN
-  const zone = Number.isNaN(parsedZone) ? null : parsedZone
+  const soil = siteSoil(enrichment)
+  const zone = siteZone(enrichment)
   const zoneUnconfirmed = zone === null
 
   const area = scan.area_sqm
@@ -214,13 +304,8 @@ export function generatePlan(input: GeneratePlanInput): GeneratedPlan {
     maintenance: maintenancePreference,
   }
 
-  // 1. Hard filters: sun, winter zone (when known), physical fit.
-  const survivors = catalogue.filter((p) => {
-    if (!p.sun_tolerance.includes(scan.sun_exposure)) return false
-    if (zone !== null && zone < p.min_hardiness_zone) return false
-    if (footprintSqm(p) > area) return false
-    return true
-  })
+  // 1. Hard filters: sun, winter zone (when known), physical fit (shared helper).
+  const survivors = matchingSurvivors({ scan, enrichment, catalogue })
 
   const empty = (): GeneratedPlan => ({
     lines: [],

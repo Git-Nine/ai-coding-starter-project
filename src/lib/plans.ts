@@ -1,5 +1,6 @@
 import type { Plant, MaintenanceLevel, Soil } from '@/lib/plants'
-import type { SunExposure, Surface, SpaceType } from '@/lib/scans'
+import type { Scan, ScanEnrichment, SunExposure, Surface, SpaceType } from '@/lib/scans'
+import { siteSoil, siteZone } from '@/lib/plan-engine'
 
 /**
  * Plan contract for PROJ-6 (Rule-Based Plan Generation).
@@ -44,6 +45,8 @@ export type PlanPlant = {
   sort_order: number
   /** Whether this plant may not suit the site's soil (computed at generation time). */
   soil_flag: boolean
+  /** PROJ-7: the user hand-set this quantity → excluded from rebalancing. */
+  pinned: boolean
   created_at: string
 }
 
@@ -53,4 +56,50 @@ export type PlanPlantWithPlant = PlanPlant & { plants: Plant | null }
 /** True when the scan's surface needs clearing/prep before planting (gravel/paved). */
 export function needsPrep(surface: Surface): boolean {
   return surface === 'gravel' || surface === 'paved'
+}
+
+/**
+ * PROJ-7: collapse lines for the same plant into one (summed quantity, pinned if any
+ * were, earliest sort order). A PROJ-6 admin reassignment can leave a plan with the
+ * same plant twice; the user must never see a duplicate. Pure.
+ */
+export function mergeDuplicateLines(lines: PlanPlantWithPlant[]): PlanPlantWithPlant[] {
+  const byPlant = new Map<string, PlanPlantWithPlant>()
+  for (const line of lines) {
+    const existing = byPlant.get(line.plant_id)
+    if (!existing) {
+      byPlant.set(line.plant_id, { ...line })
+    } else {
+      existing.quantity += line.quantity
+      existing.pinned = existing.pinned || line.pinned
+      existing.soil_flag = existing.soil_flag || line.soil_flag
+      existing.sort_order = Math.min(existing.sort_order, line.sort_order)
+    }
+  }
+  return [...byPlant.values()].sort((a, b) => a.sort_order - b.sort_order)
+}
+
+/**
+ * PROJ-7: a plan is stale when the scan's MATCHING inputs no longer equal the
+ * snapshot the plan was generated from. Cosmetic scan fields (name, photo) are
+ * ignored. Pure.
+ */
+export function isPlanStale(
+  plan: Plan,
+  current: {
+    scan: Pick<Scan, 'sun_exposure' | 'area_sqm' | 'surface' | 'space_type'>
+    enrichment: Pick<ScanEnrichment, 'soil_type' | 'soil_status' | 'hardiness_zone' | 'zone_status'> | null
+    maintenancePreference: MaintenanceLevel | null
+  },
+): boolean {
+  const { scan, enrichment, maintenancePreference } = current
+  return (
+    plan.snapshot_sun !== scan.sun_exposure ||
+    plan.snapshot_area_sqm !== scan.area_sqm ||
+    plan.snapshot_surface !== scan.surface ||
+    plan.snapshot_space_type !== scan.space_type ||
+    plan.snapshot_soil !== siteSoil(enrichment) ||
+    plan.snapshot_zone !== siteZone(enrichment) ||
+    plan.snapshot_maintenance !== maintenancePreference
+  )
 }

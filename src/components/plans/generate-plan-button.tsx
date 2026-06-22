@@ -10,6 +10,17 @@ import { PLANS_TABLE, PLAN_PLANTS_TABLE } from '@/lib/plans'
 import { generatePlan } from '@/lib/plan-engine'
 import type { Scan, ScanEnrichment } from '@/lib/scans'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 
 /**
@@ -25,6 +36,7 @@ export function GeneratePlanButton({
   label = 'Generate plan',
   variant = 'default',
   className,
+  confirmMessage,
 }: {
   scan: Scan
   enrichment: ScanEnrichment | null
@@ -32,10 +44,14 @@ export function GeneratePlanButton({
   label?: string
   variant?: 'default' | 'secondary'
   className?: string
+  /** When set, a confirmation dialog with this message is shown before generating
+   *  (used by Regenerate, which discards manual edits). */
+  confirmMessage?: string
 }) {
   const supabase = createClient()
   const router = useRouter()
   const [busy, setBusy] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   async function handleGenerate() {
     setBusy(true)
@@ -101,21 +117,47 @@ export function GeneratePlanButton({
     }
   }
 
+  const inner = busy ? (
+    <Loader2 className="h-4 w-4 animate-spin" />
+  ) : (
+    <>
+      <Sparkles className="h-4 w-4" /> {label}
+    </>
+  )
+
+  // No confirm → run directly (first-time generation has no edits to lose).
+  if (!confirmMessage) {
+    return (
+      <Button
+        type="button"
+        variant={variant}
+        className={cn('w-full', className)}
+        disabled={busy}
+        onClick={handleGenerate}
+      >
+        {inner}
+      </Button>
+    )
+  }
+
+  // Confirm first (Regenerate discards manual edits).
   return (
-    <Button
-      type="button"
-      variant={variant}
-      className={cn('w-full', className)}
-      disabled={busy}
-      onClick={handleGenerate}
-    >
-      {busy ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <>
-          <Sparkles className="h-4 w-4" /> {label}
-        </>
-      )}
-    </Button>
+    <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <AlertDialogTrigger asChild>
+        <Button type="button" variant={variant} className={cn('w-full', className)} disabled={busy}>
+          {inner}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Regenerate this plan?</AlertDialogTitle>
+          <AlertDialogDescription>{confirmMessage}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction onClick={handleGenerate}>Regenerate</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
